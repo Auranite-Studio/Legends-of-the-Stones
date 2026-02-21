@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.auranite.legendsofthestones.legendsofthestones.mixins",
+  "compatibilityLevel": "JAVA_8",
+  "refmap": "Legends-of-the-Stones.refmap.json",
+  "mixins": [
+  ],
+  "client": [
+    "PlayerAnimationMixin",
+    "PlayerAnimationRendererMixin",
+    "CameraAccessor",
+    "EntityRenderDispatcherMixin",
+    "ItemInHandRendererMixin",
+    "LevelRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

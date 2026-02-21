@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.HashMap;
 import java.util.Collection;
 import java.util.ArrayList;
+import java.nio.file.Path;
 
 
 @Mod("lgstones")
@@ -46,6 +47,10 @@ public class LegendsOfTheStones {
         ElementDamageHandler.initDamageColors();
         ElementalProjectileRegistry.register(modEventBus);
         modEventBus.addListener(ElementalProjectileRegistrations::onCommonSetup);
+        
+        // Initialize DamageNumbers mod
+        Path configDir = Path.of(".", "config");
+        new dev.foxgirl.damagenumbers.DamageNumbers(configDir);
         // End of user code block mod init
     }
 

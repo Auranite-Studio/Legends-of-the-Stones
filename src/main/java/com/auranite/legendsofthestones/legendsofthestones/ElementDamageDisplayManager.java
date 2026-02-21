@@ -8,12 +8,18 @@ import net.minecraft.world.entity.Display.TextDisplay;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+@EventBusSubscriber(Dist.CLIENT, modid = LegendsOfTheStones.MODID)
 public class ElementDamageDisplayManager {
 
     // === КОНСТАНТЫ ОТОБРАЖЕНИЯ ===
@@ -107,6 +113,19 @@ public class ElementDamageDisplayManager {
 
         TextDisplay oldStatus = ACTIVE_STATUS_DISPLAYS.remove(entityId);
         if (oldStatus != null && !oldStatus.isRemoved()) oldStatus.discard();
+    }
+
+    // === СОБЫТИЯ КЛИЕНТА ===
+    
+    @SubscribeEvent
+    @OnlyIn(Dist.CLIENT)
+    public static void onLivingIncomingDamage(LivingIncomingDamageEvent event) {
+        dev.foxgirl.damagenumbers.DamageNumbers.DamageNumbersHandler handler = dev.foxgirl.damagenumbers.DamageNumbers.getHandler();
+        if (handler instanceof dev.foxgirl.damagenumbers.client.DamageNumbersImpl impl) {
+            impl.onEntityHealthChange(event.getEntity(), 
+                                      event.getEntity().getHealth() + event.getOriginalDamage(), 
+                                      event.getEntity().getHealth());
+        }
     }
 
     // === СПАВН ЭФФЕКТОВ ===

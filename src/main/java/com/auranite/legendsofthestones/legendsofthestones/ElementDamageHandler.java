@@ -132,6 +132,8 @@ public class ElementDamageHandler {
 
 		int pointsBefore = LegendsOfTheStonesAttachments.getPoints(target, type);
 		LegendsOfTheStonesAttachments.addPoints(target, type, pointsToAdd);
+            // Синхронизируем данные накопления с клиентами
+            LegendsOfTheStonesAttachments.syncAccumulatorToClients(target);
 		int pointsAfter = LegendsOfTheStonesAttachments.getPoints(target, type);
 		boolean thresholdReached = pointsAfter >= THRESHOLD;
 
@@ -147,6 +149,8 @@ public class ElementDamageHandler {
 
 		if (thresholdReached) {
 			// ✅ ИСПРАВЛЕНО: передаём event в метод
+                    // Синхронизируем сброс порога с клиентами
+                    LegendsOfTheStonesAttachments.syncAccumulatorToClients(target);
 			finalDamage = applyThresholdEffect(target, type, event, finalDamage);
 			LegendsOfTheStonesAttachments.resetPoints(target, type);
 			LegendsOfTheStones.LOGGER.info("✨ {}! Entity: {}, Type: {} Resonance Breakthrough",

@@ -93,4 +93,11 @@ public class LegendsOfTheStonesAttachments {
             // LegendsOfTheStones.LOGGER.debug("Clearing projectile element for entity {}", entity.getId());
         }
     }
+    
+    // === МЕТОДЫ ДЛЯ СИНХРОНИЗАЦИИ ===
+    
+    public static void syncAccumulatorToClients(LivingEntity entity) {
+        Map<ElementType, Integer> accumulator = getAccumulator(entity);
+        network.SyncElementalAccumulationMessage.sendToTracking(entity, accumulator);
+    }
 }

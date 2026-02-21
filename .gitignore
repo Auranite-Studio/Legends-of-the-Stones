@@ -1,1 +1,40 @@
-Nothing should be ignored since only a Java source file was added and no build artifacts, dependencies, or temporary files are present in the changes.
+```
+# Compiled Java files
+*.class
+
+# Build directories
+target/
+build/
+
+# Dependencies
+.gradle/
+libs/
+
+# IDE files
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Temporary files
+*.tmp
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+coverage/
+htmlcov/
+*.coverage
+
+# Package manager caches
+node_modules/
+```

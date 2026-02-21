@@ -1,18 +1,23 @@
 package com.auranite.legendsofthestones.legendsofthestones;
 
+import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.core.particles.ParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Display.BillboardConstraints;
 import net.minecraft.world.entity.Display.TextDisplay;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.joml.Vector3f;
 
 public class ElementDamageDisplayManager {
 
@@ -22,8 +27,9 @@ public class ElementDamageDisplayManager {
     private static final byte FLAG_SEE_THROUGH = 2;
 
     // === ХРАНИЛИЩА ДИСПЛЕЕВ ===
-    private static final Map<Integer, TextDisplay> ACTIVE_DAMAGE_DISPLAYS = new ConcurrentHashMap<>();
-    private static final Map<Integer, TextDisplay> ACTIVE_STATUS_DISPLAYS = new ConcurrentHashMap<>();
+    // We're replacing TextDisplay with particles, so we no longer need these maps
+    // private static final Map<Integer, TextDisplay> ACTIVE_DAMAGE_DISPLAYS = new ConcurrentHashMap<>();
+    // private static final Map<Integer, TextDisplay> ACTIVE_STATUS_DISPLAYS = new ConcurrentHashMap<>();
     private static final Map<ElementType, Integer> DAMAGE_COLORS = new EnumMap<>(ElementType.class);
 
     // === РЕГИСТРАЦИЯ ЦВЕТОВ ===
@@ -47,118 +53,95 @@ public class ElementDamageDisplayManager {
     // === ОЧИСТКА ===
 
     public void cleanupStaleDisplays() {
-        int cleanedCount = 0;
-
-        Iterator<Map.Entry<Integer, TextDisplay>> damageIterator = ACTIVE_DAMAGE_DISPLAYS.entrySet().iterator();
-        while (damageIterator.hasNext()) {
-            Map.Entry<Integer, TextDisplay> entry = damageIterator.next();
-            TextDisplay display = entry.getValue();
-            if (display == null || display.isRemoved() || display.level() == null) {
-                damageIterator.remove();
-                cleanedCount++;
-                continue;
-            }
-            Entity target = display.level().getEntity(entry.getKey());
-            if (target == null || !target.isAlive()) {
-                if (!display.isRemoved()) display.discard();
-                damageIterator.remove();
-                cleanedCount++;
-            }
-        }
-
-        Iterator<Map.Entry<Integer, TextDisplay>> statusIterator = ACTIVE_STATUS_DISPLAYS.entrySet().iterator();
-        while (statusIterator.hasNext()) {
-            Map.Entry<Integer, TextDisplay> entry = statusIterator.next();
-            TextDisplay display = entry.getValue();
-            if (display == null || display.isRemoved() || display.level() == null) {
-                statusIterator.remove();
-                cleanedCount++;
-                continue;
-            }
-            Entity target = display.level().getEntity(entry.getKey());
-            if (target == null || !target.isAlive()) {
-                if (!display.isRemoved()) display.discard();
-                statusIterator.remove();
-                cleanedCount++;
-            }
-        }
-
-        if (cleanedCount > 0) {
-            LegendsOfTheStones.LOGGER.debug("ElementDamageDisplayManager: cleaned {} stale displays", cleanedCount);
-        }
+        // Since we're using particles instead of TextDisplay entities, no cleanup needed
+        // This method now serves as a placeholder for future particle cleanup if needed
     }
 
     public void cleanupAllDisplays() {
-        ACTIVE_DAMAGE_DISPLAYS.values().forEach(display -> {
-            if (display != null && !display.isRemoved()) display.discard();
-        });
-        ACTIVE_DAMAGE_DISPLAYS.clear();
-
-        ACTIVE_STATUS_DISPLAYS.values().forEach(display -> {
-            if (display != null && !display.isRemoved()) display.discard();
-        });
-        ACTIVE_STATUS_DISPLAYS.clear();
+        // Since we're using particles instead of TextDisplay entities, no cleanup needed
+        // This method now serves as a placeholder for future particle cleanup if needed
     }
 
     public void clearActiveDisplays(LivingEntity entity) {
-        int entityId = entity.getId();
-        TextDisplay oldDamage = ACTIVE_DAMAGE_DISPLAYS.remove(entityId);
-        if (oldDamage != null && !oldDamage.isRemoved()) oldDamage.discard();
-
-        TextDisplay oldStatus = ACTIVE_STATUS_DISPLAYS.remove(entityId);
-        if (oldStatus != null && !oldStatus.isRemoved()) oldStatus.discard();
+        // Since we're using particles instead of TextDisplay entities, no cleanup needed
+        // This method now serves as a placeholder for future particle cleanup if needed
     }
 
     // === СПАВН ЭФФЕКТОВ ===
 
     public void spawnDamageNumber(LivingEntity entity, float amount, ElementType type) {
         if (!(entity.level() instanceof ServerLevel serverLevel)) return;
-        int entityId = entity.getId();
-
-        TextDisplay oldDisplay = ACTIVE_DAMAGE_DISPLAYS.remove(entityId);
-        if (oldDisplay != null && !oldDisplay.isRemoved()) oldDisplay.discard();
-
+        
+        // Convert damage amount to string
+        String damageString = String.format("%.1f", amount);
+        
+        // Get color for the element type
         int color = getDamageColor(type);
-        TextDisplay display = createTextDisplay(
-                serverLevel,
-                entity.getX(),
-                entity.getY() + entity.getBbHeight() + 0.5,
-                entity.getZ(),
-                String.format("%.1f", amount),
-                color
-        );
-        if (display != null) {
-            serverLevel.addFreshEntity(display);
-            ACTIVE_DAMAGE_DISPLAYS.put(entityId, display);
-            LegendsOfTheStones.queueServerWork(DAMAGE_NUMBER_LIFETIME, () -> {
-                TextDisplay stored = ACTIVE_DAMAGE_DISPLAYS.remove(entityId);
-                if (stored != null && !stored.isRemoved()) stored.discard();
-            });
+        
+        // Extract RGB values from the color
+        float red = ((color >> 16) & 0xFF) / 255.0f;
+        float green = ((color >> 8) & 0xFF) / 255.0f;
+        float blue = (color & 0xFF) / 255.0f;
+        
+        // Create dust particle with the element's color
+        DustParticleOptions particleOptions = new DustParticleOptions(new Vector3f(red, green, blue), 1.0F);
+        
+        // Spawn particles at the entity's position with some offset above
+        Vec3 pos = entity.position().add(0, entity.getBbHeight() + 0.5, 0);
+        
+        // Spawn multiple particles to create a more visible effect
+        for (int i = 0; i < 10; i++) {
+            // Add slight random offset to spread particles
+            double offsetX = (Math.random() - 0.5) * 0.5;
+            double offsetY = (Math.random() - 0.5) * 0.5;
+            double offsetZ = (Math.random() - 0.5) * 0.5;
+            
+            serverLevel.sendParticles(
+                particleOptions,
+                pos.x + offsetX,
+                pos.y + offsetY,
+                pos.z + offsetZ,
+                1, // count
+                0, // speed (for dust particles)
+                0, // x offset
+                0, // y offset
+                0  // z offset
+            );
         }
     }
 
     public void spawnStatusText(LivingEntity entity, Component textComponent, int color) {
         if (!(entity.level() instanceof ServerLevel serverLevel)) return;
-        int entityId = entity.getId();
-
-        TextDisplay oldStatus = ACTIVE_STATUS_DISPLAYS.remove(entityId);
-        if (oldStatus != null && !oldStatus.isRemoved()) oldStatus.discard();
-
-        TextDisplay display = createTextDisplay(
-                serverLevel,
-                entity.getX(),
-                entity.getY() + entity.getBbHeight() + 1.2,
-                entity.getZ(),
-                textComponent,
-                color
-        );
-        if (display != null) {
-            serverLevel.addFreshEntity(display);
-            ACTIVE_STATUS_DISPLAYS.put(entityId, display);
-            LegendsOfTheStones.queueServerWork(STATUS_TEXT_LIFETIME, () -> {
-                TextDisplay stored = ACTIVE_STATUS_DISPLAYS.remove(entityId);
-                if (stored != null && !stored.isRemoved()) stored.discard();
-            });
+        
+        // Extract RGB values from the color
+        float red = ((color >> 16) & 0xFF) / 255.0f;
+        float green = ((color >> 8) & 0xFF) / 255.0f;
+        float blue = (color & 0xFF) / 255.0f;
+        
+        // Create dust particle with the specified color
+        DustParticleOptions particleOptions = new DustParticleOptions(new Vector3f(red, green, blue), 1.0F);
+        
+        // Spawn particles at the entity's position with some offset above
+        Vec3 pos = entity.position().add(0, entity.getBbHeight() + 1.2, 0);
+        
+        // Spawn multiple particles to create a more visible effect
+        for (int i = 0; i < 10; i++) {
+            // Add slight random offset to spread particles
+            double offsetX = (Math.random() - 0.5) * 0.5;
+            double offsetY = (Math.random() - 0.5) * 0.5;
+            double offsetZ = (Math.random() - 0.5) * 0.5;
+            
+            serverLevel.sendParticles(
+                particleOptions,
+                pos.x + offsetX,
+                pos.y + offsetY,
+                pos.z + offsetZ,
+                1, // count
+                0, // speed (for dust particles)
+                0, // x offset
+                0, // y offset
+                0  // z offset
+            );
         }
     }
 
@@ -166,36 +149,8 @@ public class ElementDamageDisplayManager {
         spawnStatusText(entity, Component.literal(text), color);
     }
 
-    // === СОЗДАНИЕ TEXTDISPLAY ===
-
-    private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, Component textComponent, int color) {
-        // ✅ ПРАВИЛЬНО: используем EntityType.TEXT_DISPLAY.create()
-        TextDisplay display = EntityType.TEXT_DISPLAY.create(level);
-
-        if (display == null) {
-            LegendsOfTheStones.LOGGER.error("Failed to create TextDisplay entity at ({}, {}, {})", x, y, z);
-            return null;
-        }
-
-        display.setPos(x, y, z);
-        display.setText(textComponent.copy().withStyle(Style.EMPTY.withColor(color)));
-        display.setBackgroundColor(0x00000000);
-        display.setFlags(FLAG_SEE_THROUGH);
-        display.setLineWidth(200);
-        display.setBillboardConstraints(BillboardConstraints.CENTER);
-        display.setNoGravity(true);
-        display.setInvulnerable(true);
-        display.setSilent(true);
-        display.setDeltaMovement(0, 0, 0);
-        display.setViewRange(64.0f);
-        display.setTransformationInterpolationDuration(0);
-        display.setTransformationInterpolationDelay(0);
-        display.setPosRotInterpolationDuration(0);
-
-        return display;
-    }
-
-    private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, String text, int color) {
-        return createTextDisplay(level, x, y, z, Component.literal(text), color);
-    }
+    // === СОЗДАНИЕ PARTICLE EFFECTS ===
+    
+    // The original TextDisplay creation methods are no longer needed since we're using particles
+    // The functionality has been replaced with particle spawning in spawnDamageNumber and spawnStatusText methods
 }

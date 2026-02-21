@@ -26,7 +26,7 @@ import java.util.Collection;
 import java.util.ArrayList;
 
 
-@Mod("power")
+@Mod("lgstones")
 public class LegendsOfTheStones {
     public static final Logger LOGGER = LogManager.getLogger(LegendsOfTheStones.class);
     public static final String MODID = "lgstones";

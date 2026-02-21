@@ -1,22 +1,65 @@
-# Gradle build system ignores
-.gradle/
-.eclipse/
+# Compiled and build artifacts
+*.class
+*.o
+*.obj
+*.out
 build/
+target/
 
-# Other IDE related folders
+# Dependencies
+lib/
+libs/
+dependency/
+dependencies/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
 .idea/
-.settings/
+*.swp
+*.swo
 
-# MCreator workspace
-.mcreator/
+# Package management
+.gradle/
+.mypy_cache/
+.pytest_cache/
+coverage/
+htmlcov/
+*.coverage
 
-# Minecraft client/server files
-run/
-runs/
+# System files
+.DS_Store
+Thumbs.db
 
-# MacOS system files
-.DS_STORE
-
-# Other Files (In Eclipse)
-.classpath
-.project
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst

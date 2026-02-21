@@ -1,28 +1,79 @@
 package com.auranite.legendsofthestones.legendsofthestones;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Display.BillboardConstraints;
 import net.minecraft.world.entity.Display.TextDisplay;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.Vec3;
+import com.mojang.blaze3d.vertex.PoseStack;
 
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class ElementDamageDisplayManager {
 
     // === КОНСТАНТЫ ОТОБРАЖЕНИЯ ===
-    private static final int DAMAGE_NUMBER_LIFETIME = 20;
+    private static final int DAMAGE_NUMBER_LIFETIME = 60; // Увеличенное время жизни для плавного движения
     private static final int STATUS_TEXT_LIFETIME = 40;
     private static final byte FLAG_SEE_THROUGH = 2;
 
-    // === ХРАНИЛИЩА ДИСПЛЕЕВ ===
-    private static final Map<Integer, TextDisplay> ACTIVE_DAMAGE_DISPLAYS = new ConcurrentHashMap<>();
+    // === НОВАЯ СИСТЕМА ОТОБРАЖЕНИЯ УРОНА ===
+    private static final Queue<DamageNumber> DAMAGE_NUMBERS = new ConcurrentLinkedQueue<>();
+
+    public static class DamageNumber {
+        public LivingEntity target;
+        public float damage;
+        public ElementType type;
+        public long spawnTime;
+        public Vec3 startPos;
+        public Vec3 currentPos;
+        public float alpha;
+
+        public DamageNumber(LivingEntity target, float damage, ElementType type, long spawnTime) {
+            this.target = target;
+            this.damage = damage;
+            this.type = type;
+            this.spawnTime = spawnTime;
+            this.startPos = new Vec3(target.getX(), target.getY() + target.getBbHeight() + 0.5, target.getZ());
+            this.currentPos = this.startPos;
+            this.alpha = 1.0f;
+        }
+
+        public boolean isExpired(long currentTime) {
+            return currentTime - spawnTime >= DAMAGE_NUMBER_LIFETIME;
+        }
+
+        public float getProgress(long currentTime) {
+            return Mth.clamp((float)(currentTime - spawnTime) / DAMAGE_NUMBER_LIFETIME, 0.0f, 1.0f);
+        }
+
+        public void updatePosition() {
+            long currentTime = target.level().getGameTime();
+            float progress = getProgress(currentTime);
+            
+            // Плавное движение вверх и исчезновение
+            double newY = startPos.y + (progress * 1.5); // Поднимаем на 1.5 блока за время жизни
+            this.currentPos = new Vec3(startPos.x, newY, startPos.z);
+            
+            // Плавное уменьшение прозрачности
+            this.alpha = 1.0f - progress;
+        }
+    }
+
+    // === ХРАНИЛИЩА ДИСПЛЕЕВ (для статусных текстов по-прежнему используем старую систему) ===
     private static final Map<Integer, TextDisplay> ACTIVE_STATUS_DISPLAYS = new ConcurrentHashMap<>();
     private static final Map<ElementType, Integer> DAMAGE_COLORS = new EnumMap<>(ElementType.class);
 
@@ -47,26 +98,19 @@ public class ElementDamageDisplayManager {
     // === ОЧИСТКА ===
 
     public void cleanupStaleDisplays() {
-        int cleanedCount = 0;
-
-        Iterator<Map.Entry<Integer, TextDisplay>> damageIterator = ACTIVE_DAMAGE_DISPLAYS.entrySet().iterator();
-        while (damageIterator.hasNext()) {
-            Map.Entry<Integer, TextDisplay> entry = damageIterator.next();
-            TextDisplay display = entry.getValue();
-            if (display == null || display.isRemoved() || display.level() == null) {
-                damageIterator.remove();
-                cleanedCount++;
-                continue;
+        long currentTime = System.currentTimeMillis();
+        
+        // Очистка чисел урона
+        DAMAGE_NUMBERS.removeIf(damageNum -> {
+            if (damageNum.target == null || damageNum.target.isRemoved() || !damageNum.target.isAlive()) {
+                return true;
             }
-            Entity target = display.level().getEntity(entry.getKey());
-            if (target == null || !target.isAlive()) {
-                if (!display.isRemoved()) display.discard();
-                damageIterator.remove();
-                cleanedCount++;
-            }
-        }
+            return damageNum.isExpired(currentTime);
+        });
 
+        // Очистка статусных дисплеев
         Iterator<Map.Entry<Integer, TextDisplay>> statusIterator = ACTIVE_STATUS_DISPLAYS.entrySet().iterator();
+        int cleanedCount = 0;
         while (statusIterator.hasNext()) {
             Map.Entry<Integer, TextDisplay> entry = statusIterator.next();
             TextDisplay display = entry.getValue();
@@ -89,11 +133,8 @@ public class ElementDamageDisplayManager {
     }
 
     public void cleanupAllDisplays() {
-        ACTIVE_DAMAGE_DISPLAYS.values().forEach(display -> {
-            if (display != null && !display.isRemoved()) display.discard();
-        });
-        ACTIVE_DAMAGE_DISPLAYS.clear();
-
+        DAMAGE_NUMBERS.clear();
+        
         ACTIVE_STATUS_DISPLAYS.values().forEach(display -> {
             if (display != null && !display.isRemoved()) display.discard();
         });
@@ -102,9 +143,6 @@ public class ElementDamageDisplayManager {
 
     public void clearActiveDisplays(LivingEntity entity) {
         int entityId = entity.getId();
-        TextDisplay oldDamage = ACTIVE_DAMAGE_DISPLAYS.remove(entityId);
-        if (oldDamage != null && !oldDamage.isRemoved()) oldDamage.discard();
-
         TextDisplay oldStatus = ACTIVE_STATUS_DISPLAYS.remove(entityId);
         if (oldStatus != null && !oldStatus.isRemoved()) oldStatus.discard();
     }
@@ -112,28 +150,12 @@ public class ElementDamageDisplayManager {
     // === СПАВН ЭФФЕКТОВ ===
 
     public void spawnDamageNumber(LivingEntity entity, float amount, ElementType type) {
-        if (!(entity.level() instanceof ServerLevel serverLevel)) return;
-        int entityId = entity.getId();
-
-        TextDisplay oldDisplay = ACTIVE_DAMAGE_DISPLAYS.remove(entityId);
-        if (oldDisplay != null && !oldDisplay.isRemoved()) oldDisplay.discard();
-
-        int color = getDamageColor(type);
-        TextDisplay display = createTextDisplay(
-                serverLevel,
-                entity.getX(),
-                entity.getY() + entity.getBbHeight() + 0.5,
-                entity.getZ(),
-                String.format("%.1f", amount),
-                color
-        );
-        if (display != null) {
-            serverLevel.addFreshEntity(display);
-            ACTIVE_DAMAGE_DISPLAYS.put(entityId, display);
-            LegendsOfTheStones.queueServerWork(DAMAGE_NUMBER_LIFETIME, () -> {
-                TextDisplay stored = ACTIVE_DAMAGE_DISPLAYS.remove(entityId);
-                if (stored != null && !stored.isRemoved()) stored.discard();
-            });
+        if (entity.level().isClientSide()) {
+            // На клиенте добавляем в очередь для отображения
+            DAMAGE_NUMBERS.offer(new DamageNumber(entity, amount, type, entity.level().getGameTime()));
+        } else {
+            // На сервере по-прежнему отправляем информацию клиентам через сеть
+            // Здесь можно реализовать отправку сетевых пакетов клиентам в радиусе
         }
     }
 
@@ -166,10 +188,104 @@ public class ElementDamageDisplayManager {
         spawnStatusText(entity, Component.literal(text), color);
     }
 
-    // === СОЗДАНИЕ TEXTDISPLAY ===
+    // === СИСТЕМА ОТРИСОВКИ ЧИСЕЛ УРОНА ===
+
+    public static void renderDamageNumbers(Minecraft minecraft, PoseStack poseStack) {
+        if (DAMAGE_NUMBERS.isEmpty()) return;
+
+        EntityRenderDispatcher entityRenderDispatcher = minecraft.getEntityRenderDispatcher();
+        Font font = minecraft.font;
+
+        long currentTime = System.currentTimeMillis();
+        DAMAGE_NUMBERS.removeIf(damageNum -> {
+            if (damageNum.target == null || damageNum.target.isRemoved() || !damageNum.target.isAlive()) {
+                return true;
+            }
+
+            damageNum.updatePosition();
+
+            // Получаем позицию камеры для правильного поворота текста
+            Vec3 cameraPos = entityRenderDispatcher.camera.getPosition();
+            
+            // Обновляем позицию каждый тик для отслеживания движения цели
+            damageNum.currentPos = new Vec3(
+                damageNum.target.getX(), 
+                damageNum.target.getY() + damageNum.target.getBbHeight() + 0.5 + (damageNum.getProgress(currentTime) * 1.5), 
+                damageNum.target.getZ()
+            );
+
+            // Вычисляем расстояние до игрока
+            double distanceSquared = cameraPos.distanceToSqr(damageNum.currentPos);
+            if (distanceSquared > 4096.0) { // Не отображаем если слишком далеко (64^2)
+                return false; // Не удаляем, так как может приблизиться
+            }
+
+            // Пропускаем если слишком близко к игроку (внутри хитбокса)
+            if (distanceSquared < 1.0) {
+                return false;
+            }
+
+            // Подготавливаем матрицу преобразования для текста
+            poseStack.pushPose();
+            
+            // Переводим в мировые координаты
+            poseStack.translate(
+                damageNum.currentPos.x - cameraPos.x,
+                damageNum.currentPos.y - cameraPos.y,
+                damageNum.currentPos.z - cameraPos.z
+            );
+
+            // Поворачиваем текст лицом к камере
+            poseStack.mulPose(entityRenderDispatcher.cameraOrientation());
+            
+            // Масштабируем текст в зависимости от расстояния
+            float scale = (float) Math.sqrt(distanceSquared) * 0.02f;
+            if (scale < 0.5f) scale = 0.5f; // Минимальный масштаб
+            poseStack.scale(scale, scale, scale);
+
+            // Инвертируем ось Y чтобы текст не был перевернутым
+            poseStack.mulPose(net.minecraft.core.Direction.NORTH.getRotation());
+
+            // Получаем цвет для типа урона
+            int color = getDamageColor(damageNum.type);
+            
+            // Добавляем прозрачность
+            int alpha = (int) (damageNum.alpha * 255);
+            if (alpha < 0) alpha = 0;
+            if (alpha > 255) alpha = 255;
+            
+            int colorWithAlpha = (color & 0x00FFFFFF) | (alpha << 24);
+
+            // Отображаем текст
+            String damageText = String.format("%.1f", damageNum.damage);
+            
+            // Центрируем текст
+            int textWidth = font.width(damageText);
+            poseStack.translate(-textWidth / 2.0, -font.lineHeight / 2.0, 0.0);
+            
+            MultiBufferSource.BufferSource buffer = minecraft.renderBuffers().bufferSource();
+            font.drawInBatch(
+                damageText,
+                0, 0, 
+                colorWithAlpha, 
+                false, 
+                poseStack.last().pose(), 
+                buffer, 
+                Font.DisplayMode.SEE_THROUGH, 
+                0, 
+                15728880 // Световой уровень
+            );
+            buffer.endBatch();
+
+            poseStack.popPose();
+
+            return damageNum.isExpired(currentTime);
+        });
+    }
+
+    // === СОЗДАНИЕ TEXTDISPLAY (для статусных текстов) ===
 
     private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, Component textComponent, int color) {
-        // ✅ ПРАВИЛЬНО: используем EntityType.TEXT_DISPLAY.create()
         TextDisplay display = EntityType.TEXT_DISPLAY.create(level);
 
         if (display == null) {

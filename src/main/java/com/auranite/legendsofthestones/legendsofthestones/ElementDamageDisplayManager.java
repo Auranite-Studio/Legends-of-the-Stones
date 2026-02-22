@@ -14,6 +14,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList; // ВАЖНО: Добавлен импорт
 
 public class ElementDamageDisplayManager {
 
@@ -28,9 +29,8 @@ public class ElementDamageDisplayManager {
     private static final double HORIZONTAL_DRIFT = 0.02;
 
     // === ФИЗИКА ДЛЯ СТАТУСА (без падения) ===
-    private static final double STATUS_FLOAT_AMPLITUDE = 0.02; // Амплитуда парения
-    private static final double STATUS_FLOAT_SPEED = 0.15;     // Скорость парения
-
+    private static final double STATUS_FLOAT_AMPLITUDE = 0.02;
+    private static final double STATUS_FLOAT_SPEED = 0.15;
     private static final int INTERPOLATION_DURATION = 3;
 
     // === ВСПОМОГАТЕЛЬНЫЙ КЛАСС ===
@@ -52,8 +52,11 @@ public class ElementDamageDisplayManager {
     private static final Map<ElementType, Integer> DAMAGE_COLORS = new EnumMap<>(ElementType.class);
 
     // === ФИЗИКА [velX, velY, velZ, ticksAlive, maxTicks, originalColor, floatOffset] ===
-    // Для статуса: velY используется как фаза для парения
     private static final Map<UUID, double[]> ACTIVE_PHYSICS = new ConcurrentHashMap<>();
+
+    // ✅ НОВОЕ: Список сущностей, запланированных на удаление в следующем тике
+    // Используем CopyOnWriteArrayList для безопасности при добавлении из разных потоков/событий
+    private static final CopyOnWriteArrayList<TextDisplay> PENDING_REMOVALS = new CopyOnWriteArrayList<>();
 
     // === ЦВЕТА ===
     public static void registerDamageColor(ElementType type, int color) {
@@ -130,26 +133,36 @@ public class ElementDamageDisplayManager {
     }
 
     public void cleanupAllDisplays() {
-        ACTIVE_DAMAGE_DISPLAYS.values().forEach(info -> {
-            if (info != null && info.display != null && !info.display.isRemoved()) info.display.discard();
-        });
+        LegendsOfTheStones.LOGGER.info("Force cleaning ALL element damage displays...");
+
+        for (DisplayInfo info : ACTIVE_DAMAGE_DISPLAYS.values()) {
+            if (info != null && info.display != null && !info.display.isRemoved()) {
+                if (info.display.level() != null) info.display.discard();
+            }
+        }
         ACTIVE_DAMAGE_DISPLAYS.clear();
 
-        ACTIVE_STATUS_DISPLAYS.values().forEach(info -> {
-            if (info != null && info.display != null && !info.display.isRemoved()) info.display.discard();
-        });
+        for (DisplayInfo info : ACTIVE_STATUS_DISPLAYS.values()) {
+            if (info != null && info.display != null && !info.display.isRemoved()) {
+                if (info.display.level() != null) info.display.discard();
+            }
+        }
         ACTIVE_STATUS_DISPLAYS.clear();
 
         ACTIVE_PHYSICS.clear();
+        LegendsOfTheStones.LOGGER.info("All element damage displays cleared successfully.");
     }
 
     public void clearActiveDisplays(LivingEntity entity) {
+        if (entity == null) return;
         int entityId = entity.getId();
 
         ACTIVE_DAMAGE_DISPLAYS.entrySet().removeIf(entry -> {
             DisplayInfo info = entry.getValue();
             if (info != null && info.targetEntityId == entityId) {
-                if (info.display != null && !info.display.isRemoved()) info.display.discard();
+                if (info.display != null && !info.display.isRemoved()) {
+                    if (info.display.level() != null) info.display.discard();
+                }
                 ACTIVE_PHYSICS.remove(entry.getKey());
                 return true;
             }
@@ -159,7 +172,9 @@ public class ElementDamageDisplayManager {
         ACTIVE_STATUS_DISPLAYS.entrySet().removeIf(entry -> {
             DisplayInfo info = entry.getValue();
             if (info != null && info.targetEntityId == entityId) {
-                if (info.display != null && !info.display.isRemoved()) info.display.discard();
+                if (info.display != null && !info.display.isRemoved()) {
+                    if (info.display.level() != null) info.display.discard();
+                }
                 ACTIVE_PHYSICS.remove(entry.getKey());
                 return true;
             }
@@ -167,12 +182,88 @@ public class ElementDamageDisplayManager {
         });
     }
 
-    // === СПАВН ===
+    /**
+     * ✅ ИСПРАВЛЕНО: Теперь не удаляет сущности сразу, а добавляет их в очередь.
+     * Это предотвращает ConcurrentModificationException при сохранении чанка.
+     */
+    public int cleanupDisplaysInChunk(ServerLevel level, int chunkX, int chunkZ) {
+        int count = 0;
 
+        // Очистка урона
+        Iterator<Map.Entry<UUID, DisplayInfo>> damageIterator = ACTIVE_DAMAGE_DISPLAYS.entrySet().iterator();
+        while (damageIterator.hasNext()) {
+            Map.Entry<UUID, DisplayInfo> entry = damageIterator.next();
+            DisplayInfo info = entry.getValue();
+
+            if (info != null && info.display != null && !info.display.isRemoved()) {
+                int dChunkX = (int) Math.floor(info.display.getX() / 16.0);
+                int dChunkZ = (int) Math.floor(info.display.getZ() / 16.0);
+
+                if (dChunkX == chunkX && dChunkZ == chunkZ) {
+                    // ✅ ДОБАВЛЯЕМ В ОЧЕРЕДЬ вместо немедленного удаления
+                    PENDING_REMOVALS.add(info.display);
+
+                    // Удаляем из наших карт сразу, чтобы не дублировать логику
+                    damageIterator.remove();
+                    ACTIVE_PHYSICS.remove(entry.getKey());
+                    count++;
+                }
+            } else if (info == null || info.display == null || info.display.isRemoved()) {
+                damageIterator.remove();
+                ACTIVE_PHYSICS.remove(entry.getKey());
+            }
+        }
+
+        // Очистка статусов
+        Iterator<Map.Entry<UUID, DisplayInfo>> statusIterator = ACTIVE_STATUS_DISPLAYS.entrySet().iterator();
+        while (statusIterator.hasNext()) {
+            Map.Entry<UUID, DisplayInfo> entry = statusIterator.next();
+            DisplayInfo info = entry.getValue();
+
+            if (info != null && info.display != null && !info.display.isRemoved()) {
+                int dChunkX = (int) Math.floor(info.display.getX() / 16.0);
+                int dChunkZ = (int) Math.floor(info.display.getZ() / 16.0);
+
+                if (dChunkX == chunkX && dChunkZ == chunkZ) {
+                    // ✅ ДОБАВЛЯЕМ В ОЧЕРЕДЬ вместо немедленного удаления
+                    PENDING_REMOVALS.add(info.display);
+
+                    statusIterator.remove();
+                    ACTIVE_PHYSICS.remove(entry.getKey());
+                    count++;
+                }
+            } else if (info == null || info.display == null || info.display.isRemoved()) {
+                statusIterator.remove();
+                ACTIVE_PHYSICS.remove(entry.getKey());
+            }
+        }
+
+        return count;
+    }
+
+    /**
+     * ✅ НОВЫЙ МЕТОД: Выполняет отложенное удаление.
+     * Вызывается в начале каждого тика сервера (в ElementDamageHandler.onServerTick).
+     */
+    public void processPendingRemovals() {
+        if (PENDING_REMOVALS.isEmpty()) return;
+
+        for (TextDisplay display : PENDING_REMOVALS) {
+            if (display != null && !display.isRemoved() && display.level() != null) {
+                try {
+                    display.discard();
+                } catch (Exception e) {
+                    LegendsOfTheStones.LOGGER.warn("Failed to discard pending display: {}", e.getMessage());
+                }
+            }
+        }
+        PENDING_REMOVALS.clear();
+    }
+
+    // === СПАВН ===
     public void spawnDamageNumber(LivingEntity entity, float amount, ElementType type) {
         if (!(entity.level() instanceof ServerLevel serverLevel)) return;
         int entityId = entity.getId();
-
         int color = getDamageColor(type);
 
         double offsetX = (serverLevel.random.nextFloat() - 0.5f) * 0.5;
@@ -189,11 +280,10 @@ public class ElementDamageDisplayManager {
 
         if (display != null) {
             serverLevel.addFreshEntity(display);
-
             UUID displayUuid = display.getUUID();
+
             ACTIVE_DAMAGE_DISPLAYS.put(displayUuid, new DisplayInfo(display, entityId, false));
 
-            // [velX, velY, velZ, ticksAlive, maxTicks, originalColor, floatOffset]
             double randomX = (serverLevel.random.nextFloat() - 0.5f) * HORIZONTAL_DRIFT;
             double randomZ = (serverLevel.random.nextFloat() - 0.5f) * HORIZONTAL_DRIFT;
             ACTIVE_PHYSICS.put(displayUuid, new double[]{randomX, DAMAGE_INITIAL_VELOCITY_Y, randomZ, 0, DAMAGE_NUMBER_LIFETIME, color, 0});
@@ -225,14 +315,13 @@ public class ElementDamageDisplayManager {
                 textComponent,
                 color
         );
+
         if (display != null) {
             serverLevel.addFreshEntity(display);
-
             UUID displayUuid = display.getUUID();
+
             ACTIVE_STATUS_DISPLAYS.put(displayUuid, new DisplayInfo(display, entityId, true));
 
-            // [velX, velY, velZ, ticksAlive, maxTicks, originalColor, floatOffset]
-            // Для статуса: используем floatOffset как фазу для парения
             double randomPhase = serverLevel.random.nextDouble() * Math.PI * 2;
             ACTIVE_PHYSICS.put(displayUuid, new double[]{0, 0, 0, 0, STATUS_TEXT_LIFETIME, color, randomPhase});
 
@@ -253,7 +342,6 @@ public class ElementDamageDisplayManager {
     }
 
     // === ФИЗИКА И ЭФФЕКТЫ ===
-
     private void schedulePhysicsUpdate(ServerLevel level, UUID displayUuid) {
         LegendsOfTheStones.queueServerWork(1, () -> {
             TextDisplay display = (TextDisplay) level.getEntity(displayUuid);
@@ -264,32 +352,28 @@ public class ElementDamageDisplayManager {
                 return;
             }
 
-            physics[3]++;
+            physics[3]++; // ticksAlive++
             int ticksAlive = (int) physics[3];
             int maxTicks = (int) physics[4];
             int originalColor = (int) physics[5];
             double floatPhase = physics[6];
 
-            // === РАЗНАЯ ЛОГИКА ДЛЯ УРОНА И СТАТУСА ===
             DisplayInfo info = ACTIVE_DAMAGE_DISPLAYS.get(displayUuid);
             if (info == null) info = ACTIVE_STATUS_DISPLAYS.get(displayUuid);
 
             if (info != null && info.isStatus) {
                 // === СТАТУС: Парение + Переливание ===
-
-                // 1. Плавное парение на месте (синусоида)
                 floatPhase += STATUS_FLOAT_SPEED;
                 physics[6] = floatPhase;
+
                 double floatOffset = Math.sin(floatPhase) * STATUS_FLOAT_AMPLITUDE;
                 display.setPos(display.getX(), display.getY() + floatOffset, display.getZ());
 
-                // 2. Переливание цветом (пульсация между исходным цветом и белым)
-                double pulse = (Math.sin(floatPhase * 2) + 1) / 2; // 0..1
+                double pulse = (Math.sin(floatPhase * 2) + 1) / 2;
                 int r = (originalColor >> 16) & 0xFF;
                 int g = (originalColor >> 8) & 0xFF;
                 int b = originalColor & 0xFF;
 
-                // Смешиваем с белым (255, 255, 255)
                 int shimmerR = (int) (r + (255 - r) * pulse * 0.5);
                 int shimmerG = (int) (g + (255 - g) * pulse * 0.5);
                 int shimmerB = (int) (b + (255 - b) * pulse * 0.5);
@@ -302,11 +386,9 @@ public class ElementDamageDisplayManager {
 
             } else {
                 // === УРОН: Падение с гравитацией ===
-
                 physics[1] += DAMAGE_GRAVITY;
                 display.setPos(display.getX() + physics[0], display.getY() + physics[1], display.getZ() + physics[2]);
 
-                // Fade-out для урона
                 int fadeStartTick = (int) (maxTicks * 0.7);
                 if (ticksAlive >= fadeStartTick) {
                     int fadeTicks = maxTicks - fadeStartTick;
@@ -331,15 +413,14 @@ public class ElementDamageDisplayManager {
                 schedulePhysicsUpdate(level, displayUuid);
             } else {
                 ACTIVE_PHYSICS.remove(displayUuid);
+                if (!display.isRemoved()) display.discard();
             }
         });
     }
 
     // === СОЗДАНИЕ ===
-
     private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, Component textComponent, int color) {
         TextDisplay display = EntityType.TEXT_DISPLAY.create(level);
-
         if (display == null) {
             LegendsOfTheStones.LOGGER.error("Failed to create TextDisplay entity at ({}, {}, {})", x, y, z);
             return null;
@@ -347,17 +428,14 @@ public class ElementDamageDisplayManager {
 
         display.setPos(x, y, z);
         display.setText(textComponent.copy().withStyle(Style.EMPTY.withColor(color).withBold(true)));
-
         display.setBackgroundColor(0x00000000);
         display.setFlags(FLAG_SEE_THROUGH);
         display.setLineWidth(200);
         display.setBillboardConstraints(BillboardConstraints.CENTER);
-
         display.setNoGravity(true);
         display.setInvulnerable(true);
         display.setSilent(true);
         display.setViewRange(64.0f);
-
         display.setPosRotInterpolationDuration(INTERPOLATION_DURATION);
         display.setTransformationInterpolationDuration(INTERPOLATION_DURATION);
         display.setTransformationInterpolationDelay(0);

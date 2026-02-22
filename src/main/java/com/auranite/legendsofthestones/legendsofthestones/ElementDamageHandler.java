@@ -5,6 +5,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
@@ -16,6 +17,8 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.level.ChunkDataEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
@@ -67,15 +70,22 @@ public class ElementDamageHandler {
 	}
 
 	// === СОБЫТИЯ ===
-
 	@SubscribeEvent
 	public static void onServerTick(ServerTickEvent.Pre event) {
 		currentServer = event.getServer();
+
+		// Обработка отложенных удалений (критично для предотвращения крашей при выгрузке чанков)
+		if (displayManager != null) {
+			displayManager.processPendingRemovals();
+		}
+
 		serverTickCounter++;
 		if (serverTickCounter >= CLEANUP_INTERVAL) {
 			serverTickCounter = 0;
 			checkAndResetInactivePoints();
-			if (displayManager != null) displayManager.cleanupStaleDisplays();
+			if (displayManager != null) {
+				displayManager.cleanupStaleDisplays();
+			}
 		}
 	}
 
@@ -83,7 +93,6 @@ public class ElementDamageHandler {
 	public static void onLivingHurt(LivingDamageEvent.Pre event) {
 		LivingEntity target = event.getEntity();
 		DamageSource source = event.getSource();
-
 		ElementType type = getElementTypeFromSource(source);
 
 		if (type == null) {
@@ -96,7 +105,7 @@ public class ElementDamageHandler {
 		// === РАСЧЁТ МНОЖИТЕЛЯ НАКОПЛЕНИЯ ===
 		float effectiveAccumMultiplier = 1.0f;
 
-		// 1. Приоритет: множитель из самого снаряда
+		// 1. Приоритет: множитель из самого снаряда (ИСПРАВЛЕНО: убрана лямбда)
 		if (source.getDirectEntity() != null) {
 			Optional<Float> projectileAccum = ElementalProjectileRegistry.getAccumulationMultiplierForEntity(source.getDirectEntity());
 			if (projectileAccum.isPresent()) {
@@ -146,20 +155,17 @@ public class ElementDamageHandler {
 				originalDamage, resistance.damageResistance(), finalDamage, resistance);
 
 		if (thresholdReached) {
-			// ✅ ИСПРАВЛЕНО: передаём event в метод
 			finalDamage = applyThresholdEffect(target, type, event, finalDamage);
 			LegendsOfTheStonesAttachments.resetPoints(target, type);
 			LegendsOfTheStones.LOGGER.info("✨ {}! Entity: {}, Type: {} Resonance Breakthrough",
 					target.getName().getString(), type);
 		}
 
-		// Применяем финальный урон
 		event.setNewDamage(finalDamage);
 
 		if (canShowDamage(target)) {
 			spawnDamageNumber(target, finalDamage, type);
 		}
-
 		updateLastDamageTime(target, type);
 	}
 
@@ -181,19 +187,65 @@ public class ElementDamageHandler {
 		}
 	}
 
+	// ✅ НОВОЕ: Очистка ПРИ ВЫХОДЕ ИГРОКА (до выгрузки мира)
+	@SubscribeEvent
+	public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+		// Исправление ошибки приведения типа: явная проверка instanceof
+		if (!(event.getEntity() instanceof ServerPlayer player)) {
+			return;
+		}
+
+		LegendsOfTheStones.LOGGER.info("Player {} logged out. Force cleaning all damage displays immediately.", player.getName().getString());
+
+		if (displayManager != null) {
+			// Очищаем дисплеи, где игрок был целью
+			clearActiveDisplays(player);
+
+			// В синглплеере или если игрок был источником урона для многих мобов,
+			// лучше очистить ВСЕ дисплеи превентивно, чтобы они не сохранились в чанках.
+			displayManager.cleanupAllDisplays();
+		}
+
+		DAMAGE_COOLDOWNS.clear();
+		LAST_DAMAGE_TIME.clear();
+	}
+
 	@SubscribeEvent
 	public static void onLevelUnload(LevelEvent.Unload event) {
 		if (event.getLevel() instanceof ServerLevel) {
-			if (displayManager != null) displayManager.cleanupAllDisplays();
-			LegendsOfTheStones.LOGGER.info("ElementDamageHandler: cleaned up all displays on level unload");
+			// Дублирующая очистка на случай, если мир выгрузился по другой причине
+			if (displayManager != null) {
+				displayManager.cleanupAllDisplays();
+			}
+			LegendsOfTheStones.LOGGER.info("Level unloading. Final cleanup check performed.");
+		}
+	}
+
+	// ✅ НОВОЕ: ОБРАБОТКА ВЫГРУЗКИ ЧАНКА (отложенное удаление)
+	@SubscribeEvent
+	public static void onChunkUnload(ChunkDataEvent.Save event) {
+		if (displayManager == null) return;
+
+		if (!(event.getLevel() instanceof ServerLevel level)) {
+			return;
+		}
+
+		int chunkX = event.getChunk().getPos().x;
+		int chunkZ = event.getChunk().getPos().z;
+
+		// Этот метод только помечает сущности на удаление (добавляет в очередь),
+		// чтобы не вызвать ConcurrentModificationException во время сохранения чанка.
+		int markedCount = displayManager.cleanupDisplaysInChunk(level, chunkX, chunkZ);
+
+		if (markedCount > 0) {
+			LegendsOfTheStones.LOGGER.debug("Marked {} visual effects for removal from unloading chunk [{}, {}]",
+					markedCount, chunkX, chunkZ);
 		}
 	}
 
 	// === ЛОГИКА ОПРЕДЕЛЕНИЯ ЭЛЕМЕНТА ===
-
 	private static ElementType getElementTypeFromSource(DamageSource source) {
 		Entity directEntity = source.getDirectEntity();
-
 		if (directEntity != null) {
 			Optional<ElementType> registryElement = ElementalProjectileRegistry.getElementForEntity(directEntity);
 			if (registryElement.isPresent()) {
@@ -209,6 +261,7 @@ public class ElementDamageHandler {
 			ItemStack weapon = attacker.getMainHandItem();
 			Optional<ElementType> componentType = ElementalWeaponComponent.getElement(weapon);
 			if (componentType.isPresent()) return componentType.get();
+
 			ElementType registryType = ElementalWeaponRegistry.getElementType(weapon);
 			if (registryType != null) return registryType;
 		}
@@ -240,7 +293,6 @@ public class ElementDamageHandler {
 	}
 
 	// === УПРАВЛЕНИЕ ВРЕМЕНЕМ ПОСЛЕДНЕГО УРОНА ===
-
 	private static void updateLastDamageTime(LivingEntity entity, ElementType type) {
 		int entityId = entity.getId();
 		long gameTime = entity.level().getGameTime();
@@ -304,9 +356,10 @@ public class ElementDamageHandler {
 	}
 
 	// === ДЕЛЕГИРОВАНИЕ ВИЗУАЛИЗАЦИИ ===
-
 	private static void clearActiveDisplays(LivingEntity entity) {
-		if (displayManager != null) displayManager.clearActiveDisplays(entity);
+		if (displayManager != null) {
+			displayManager.clearActiveDisplays(entity);
+		}
 	}
 
 	private static void spawnDamageNumber(LivingEntity entity, float amount, ElementType type) {
@@ -328,7 +381,6 @@ public class ElementDamageHandler {
 	}
 
 	// === ПОРОГОВЫЕ ЭФФЕКТЫ ===
-
 	public static int getThreshold() { return THRESHOLD; }
 
 	public static void setThreshold(int threshold) {
@@ -343,10 +395,8 @@ public class ElementDamageHandler {
 		return ElementDamageDisplayManager.getAllDamageColors();
 	}
 
-	// === ОБНОВЛЁННЫЙ МЕТОД: с параметром event ===
 	private static float applyThresholdEffect(LivingEntity target, ElementType type, LivingDamageEvent.Pre event, float currentDamage) {
 		LegendsOfTheStones.LOGGER.info("THRESHOLD REACHED! Entity: {}, Type: {}", target.getName().getString(), type);
-
 		return switch (type) {
 			case FIRE -> {
 				target.igniteForSeconds(5);
@@ -375,9 +425,6 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.earth_petrify"), 0x8B4513);
 				yield currentDamage * 1.5f;
 			}
-
-			// === НОВЫЕ ЭЛЕМЕНТЫ ===
-
 			case ICE -> {
 				target.setTicksFrozen(160);
 				if (target.isOnFire()) {
@@ -387,7 +434,6 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.ice_freeze"), 0x00BFFF);
 				yield currentDamage * 1.25f;
 			}
-
 			case ELECTRIC -> {
 				target.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 40, 0));
 				target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 60, 1));
@@ -401,7 +447,6 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.electric_shock"), 0xFFFF00);
 				yield currentDamage * 1.5f;
 			}
-
 			case SOURCE -> {
 				var random = target.level().random;
 				switch (random.nextInt(4)) {
@@ -413,17 +458,14 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.source_void"), 0x9932CC);
 				yield currentDamage * 2.0f;
 			}
-
 			case NATURAL -> {
 				target.addEffect(new MobEffectInstance(MobEffects.POISON, 100, 1));
-				// ✅ ТЕПЕРЬ event ДОСТУПЕН — регенерация атакующего
 				if (event.getSource().getEntity() instanceof LivingEntity attacker && attacker != target) {
 					attacker.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 60, 0));
 				}
 				spawnStatusText(target, Component.translatable("elemental.tooltip.natural_bloom"), 0x32CD32);
 				yield currentDamage;
 			}
-
 			case QUANTUM -> {
 				if (!target.level().isClientSide && target.getRandom().nextFloat() < 0.5f) {
 					double dx = (target.getRandom().nextDouble() - 0.5) * 10;
@@ -435,7 +477,6 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.quantum_flux"), 0xFF00FF);
 				yield currentDamage * quantumMultiplier;
 			}
-
 			default -> currentDamage;
 		};
 	}
@@ -470,9 +511,6 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.earth_petrify"), 0x8B4513);
 				yield originalDamage * 1.5f;
 			}
-
-			// === НОВЫЕ ЭЛЕМЕНТЫ ===
-
 			case ICE -> {
 				target.setTicksFrozen(160);
 				if (target.isOnFire()) {
@@ -482,7 +520,6 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.ice_freeze"), 0x00BFFF);
 				yield originalDamage * 1.25f;
 			}
-
 			case ELECTRIC -> {
 				target.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 40, 0));
 				target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 60, 1));
@@ -496,7 +533,6 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.electric_shock"), 0xFFFF00);
 				yield originalDamage * 1.5f;
 			}
-
 			case SOURCE -> {
 				var random = target.level().random;
 				switch (random.nextInt(4)) {
@@ -508,13 +544,11 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.source_void"), 0x9932CC);
 				yield originalDamage * 2.0f;
 			}
-
 			case NATURAL -> {
 				target.addEffect(new MobEffectInstance(MobEffects.POISON, 100, 1));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.natural_bloom"), 0x32CD32);
 				yield originalDamage;
 			}
-
 			case QUANTUM -> {
 				if (!target.level().isClientSide && target.getRandom().nextFloat() < 0.5f) {
 					double dx = (target.getRandom().nextDouble() - 0.5) * 10;
@@ -526,13 +560,11 @@ public class ElementDamageHandler {
 				spawnStatusText(target, Component.translatable("elemental.tooltip.quantum_flux"), 0xFF00FF);
 				yield originalDamage * quantumMultiplier;
 			}
-
 			default -> originalDamage;
 		};
 	}
 
 	// === ПУБЛИЧНЫЙ API ===
-
 	public static void setBaseAccumulation(float value) { baseAccumulation = value; }
 	public static float getBaseAccumulation() { return baseAccumulation; }
 
@@ -600,7 +632,6 @@ public class ElementDamageHandler {
 				spawnDamageNumber(livingTarget, finalDamage, type);
 			}
 		}
-
 		target.hurt(source, finalDamage);
 		updateLastDamageTime(livingTarget, type);
 	}
@@ -657,7 +688,6 @@ public class ElementDamageHandler {
 				spawnDamageNumber(livingTarget, finalDamage, type);
 			}
 		}
-
 		target.hurt(source, finalDamage);
 		updateLastDamageTime(livingTarget, type);
 	}
@@ -697,7 +727,6 @@ public class ElementDamageHandler {
 	}
 
 	// === УТИЛИТЫ ДЛЯ СНАРЯДОВ ===
-
 	public static void markProjectileAsElemental(Entity projectile, ElementType type) {
 		if (projectile != null && !projectile.level().isClientSide) {
 			LegendsOfTheStonesAttachments.setProjectileElement(projectile, type);
@@ -715,7 +744,6 @@ public class ElementDamageHandler {
 		if (!(target.level() instanceof ServerLevel serverLevel) || !(target instanceof LivingEntity livingTarget)) {
 			return;
 		}
-
 		if (ElementResistanceManager.isImmune(target, elementType)) {
 			LegendsOfTheStones.LOGGER.debug("{} is IMMUNE to {} (instant)", target.getName().getString(), elementType);
 			return;
@@ -724,7 +752,6 @@ public class ElementDamageHandler {
 		var damageTypeRegistry = serverLevel.registryAccess().registryOrThrow(Registries.DAMAGE_TYPE);
 		var rl = ResourceLocation.fromNamespaceAndPath(LegendsOfTheStones.MODID, elementType.getDamageTypeId());
 		var damageTypeHolder = damageTypeRegistry.getHolder(rl);
-
 		if (damageTypeHolder.isEmpty()) {
 			LegendsOfTheStones.LOGGER.error("Damage type NOT FOUND: {}", rl);
 			return;
@@ -752,11 +779,9 @@ public class ElementDamageHandler {
 				LegendsOfTheStonesAttachments.resetPoints(livingTarget, elementType);
 			}
 		}
-
 		if (canShowDamage(livingTarget)) {
 			spawnDamageNumber(livingTarget, finalDamage, elementType);
 		}
-
 		target.hurt(dmgSource, finalDamage);
 		updateLastDamageTime(livingTarget, elementType);
 	}

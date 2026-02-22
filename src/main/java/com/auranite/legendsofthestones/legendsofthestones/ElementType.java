@@ -37,6 +37,39 @@ public enum ElementType {
                 .findFirst();
     }
 
+    public static ElementType fromVanillaDamageType(String damageTypeId) {
+        if (damageTypeId == null) return PHYSICAL; // По умолчанию физический
+
+        String id = damageTypeId.contains(":") ? damageTypeId.split(":")[1] : damageTypeId;
+
+        return switch (id) {
+
+            case "arrow", "player_attack", "mob_attack", "mob_projectile",
+                 "fall", "anvil", "falling_block", "cactus", "sweet_berry_bush",
+                 "fly_into_wall", "dragon_breath", "wither_skull", "trident" -> PHYSICAL;
+
+            case "in_fire", "on_fire", "lava", "hot_floor" -> FIRE;
+
+            case "drown" -> WATER; // freeze тоже считаем водой/льдом
+
+            case "generic" -> WIND;
+
+            case "stalagmite" -> EARTH;
+
+            case "lightning_bolt" -> ELECTRIC;
+
+            case "freeze" -> ICE;
+
+            case "indirect_magic","magic", "thorns", "sonic_boom" -> SOURCE;
+
+            case "poison", "wither" -> NATURAL;
+
+            case "out_of_world", "generic_kill" -> QUANTUM;
+
+            default -> PHYSICAL;
+        };
+    }
+
     @Override
     public String toString() {
         return name();

@@ -29,13 +29,15 @@ public class ElementalProjectileRegistrations {
         // Огненные
         ElementalProjectileRegistry.registerProjectile(EntityType.FIREBALL, ElementType.FIRE, 100f);
         ElementalProjectileRegistry.registerProjectile(EntityType.SMALL_FIREBALL, ElementType.FIRE, 50f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.DRAGON_FIREBALL, ElementType.FIRE, 25f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.DRAGON_FIREBALL, ElementType.SOURCE, 25f);
 
         // Другие
         ElementalProjectileRegistry.registerProjectile(EntityType.FIREWORK_ROCKET, ElementType.PHYSICAL, 50f);
         ElementalProjectileRegistry.registerProjectile(EntityType.WITHER_SKULL, ElementType.EARTH, 20f);
         ElementalProjectileRegistry.registerProjectile(EntityType.SHULKER_BULLET, ElementType.WIND, 20f);
         ElementalProjectileRegistry.registerProjectile(EntityType.LLAMA_SPIT, ElementType.WATER, 3f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.BREEZE_WIND_CHARGE, ElementType.WIND, 20f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.WIND_CHARGE, ElementType.WIND, 20f);
 
         // === КАСТОМНЫЕ СНАРЯДЫ МОДА ===
         // ✅ ТЕПЕРЬ МОЖНО ИСПОЛЬЗОВАТЬ .get() БЕЗ ОШИБОК

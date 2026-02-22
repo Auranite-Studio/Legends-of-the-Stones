@@ -60,13 +60,11 @@ public class ElementDamageHandler {
 		ElementDamageDisplayManager.registerDamageColor(ElementType.WIND, 0x00FFFF);
 		ElementDamageDisplayManager.registerDamageColor(ElementType.WATER, 0x0080FF);
 		ElementDamageDisplayManager.registerDamageColor(ElementType.EARTH, 0x8B4513);
-
-		// Новые элементы
-		ElementDamageDisplayManager.registerDamageColor(ElementType.ICE, 0x00BFFF);       // ❄️ Голубой лёд
-		ElementDamageDisplayManager.registerDamageColor(ElementType.ELECTRIC, 0xFFFF00);  // ⚡ Жёлтый разряд
-		ElementDamageDisplayManager.registerDamageColor(ElementType.SOURCE, 0x9932CC);    // 🔮 Тёмная орхидея
-		ElementDamageDisplayManager.registerDamageColor(ElementType.NATURAL, 0x32CD32);   // 🌿 Лаймовый
-		ElementDamageDisplayManager.registerDamageColor(ElementType.QUANTUM, 0xFF00FF);   // ⚛️ Маджента
+		ElementDamageDisplayManager.registerDamageColor(ElementType.ICE, 0x00BFFF);
+		ElementDamageDisplayManager.registerDamageColor(ElementType.ELECTRIC, 0x9932CC);
+		ElementDamageDisplayManager.registerDamageColor(ElementType.SOURCE, 0xFF5C77);
+		ElementDamageDisplayManager.registerDamageColor(ElementType.NATURAL, 0x32CD32);
+		ElementDamageDisplayManager.registerDamageColor(ElementType.QUANTUM, 0x9400D3);
 	}
 
 	// === СОБЫТИЯ ===
@@ -74,7 +72,7 @@ public class ElementDamageHandler {
 	public static void onServerTick(ServerTickEvent.Pre event) {
 		currentServer = event.getServer();
 
-		// Обработка отложенных удалений (критично для предотвращения крашей при выгрузке чанков)
+		// Обработка отложенных удалений
 		if (displayManager != null) {
 			displayManager.processPendingRemovals();
 		}
@@ -93,6 +91,8 @@ public class ElementDamageHandler {
 	public static void onLivingHurt(LivingDamageEvent.Pre event) {
 		LivingEntity target = event.getEntity();
 		DamageSource source = event.getSource();
+
+		// 1. Определение типа элемента (включая ванильные типы)
 		ElementType type = getElementTypeFromSource(source);
 
 		if (type == null) {
@@ -105,7 +105,7 @@ public class ElementDamageHandler {
 		// === РАСЧЁТ МНОЖИТЕЛЯ НАКОПЛЕНИЯ ===
 		float effectiveAccumMultiplier = 1.0f;
 
-		// 1. Приоритет: множитель из самого снаряда (ИСПРАВЛЕНО: убрана лямбда)
+		// 1. Приоритет: множитель из самого снаряда
 		if (source.getDirectEntity() != null) {
 			Optional<Float> projectileAccum = ElementalProjectileRegistry.getAccumulationMultiplierForEntity(source.getDirectEntity());
 			if (projectileAccum.isPresent()) {
@@ -149,10 +149,40 @@ public class ElementDamageHandler {
 
 		float finalDamage = event.getOriginalDamage();
 		float originalDamage = finalDamage;
+
+		// Применяем базовое сопротивление элемента
 		finalDamage = ElementResistanceManager.calculateReducedDamage(target, type, finalDamage);
 
-		LegendsOfTheStones.LOGGER.debug("Damage calculation: {} × (1 - {}) = {} (Resistance: {})",
-				originalDamage, resistance.damageResistance(), finalDamage, resistance);
+		// ========================================================================
+		// === НОВАЯ ЛОГИКА: УЧЕТ ГЛОБАЛЬНЫХ СТАТУСОВ (Раскол, Цветение, Пробой) ===
+		// ========================================================================
+
+//		if (target.hasEffect(PowerModMobEffects.RIFT.get())) {
+//			int amp = target.getEffect(PowerModMobEffects.RIFT.get()).getAmplifier();
+//			float multiplier = 1.0f + (0.20f * (amp + 1));
+//			finalDamage *= multiplier;
+//
+//			if (target.tickCount % 20 == 0 && !target.level().isClientSide) {
+//				((ServerLevel)target.level()).sendParticles(net.minecraft.core.particles.ParticleTypes.PORTAL,
+//						target.getX(), target.getY() + 1, target.getZ(), 2, 0.5, 0.5, 0.5, 0.01);
+//			}
+//		}
+//
+//		if (target.hasEffect(PowerModMobEffects.BLOOM.get())) {
+//			int amp = target.getEffect(PowerModMobEffects.BLOOM.get()).getAmplifier();
+//			float vulnerability = 1.0f + (0.10f * (amp + 1));
+//			finalDamage *= vulnerability;
+//		}
+//
+//		if (target.hasEffect(PowerModMobEffects.PHASE_SHIFT.get())) {
+//			finalDamage = Math.max(finalDamage, originalDamage);
+//
+//			if (!target.level().isClientSide) {
+//				((ServerLevel)target.level()).sendParticles(net.minecraft.core.particles.ParticleTypes.END_ROD,
+//						target.getX(), target.getY() + 1, target.getZ(), 3, 0.3, 0.3, 0.3, 0.05);
+//			}
+//		}
+		// ========================================================================
 
 		if (thresholdReached) {
 			finalDamage = applyThresholdEffect(target, type, event, finalDamage);
@@ -187,10 +217,8 @@ public class ElementDamageHandler {
 		}
 	}
 
-	// ✅ НОВОЕ: Очистка ПРИ ВЫХОДЕ ИГРОКА (до выгрузки мира)
 	@SubscribeEvent
 	public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-		// Исправление ошибки приведения типа: явная проверка instanceof
 		if (!(event.getEntity() instanceof ServerPlayer player)) {
 			return;
 		}
@@ -198,11 +226,7 @@ public class ElementDamageHandler {
 		LegendsOfTheStones.LOGGER.info("Player {} logged out. Force cleaning all damage displays immediately.", player.getName().getString());
 
 		if (displayManager != null) {
-			// Очищаем дисплеи, где игрок был целью
 			clearActiveDisplays(player);
-
-			// В синглплеере или если игрок был источником урона для многих мобов,
-			// лучше очистить ВСЕ дисплеи превентивно, чтобы они не сохранились в чанках.
 			displayManager.cleanupAllDisplays();
 		}
 
@@ -213,7 +237,6 @@ public class ElementDamageHandler {
 	@SubscribeEvent
 	public static void onLevelUnload(LevelEvent.Unload event) {
 		if (event.getLevel() instanceof ServerLevel) {
-			// Дублирующая очистка на случай, если мир выгрузился по другой причине
 			if (displayManager != null) {
 				displayManager.cleanupAllDisplays();
 			}
@@ -221,7 +244,6 @@ public class ElementDamageHandler {
 		}
 	}
 
-	// ✅ НОВОЕ: ОБРАБОТКА ВЫГРУЗКИ ЧАНКА (отложенное удаление)
 	@SubscribeEvent
 	public static void onChunkUnload(ChunkDataEvent.Save event) {
 		if (displayManager == null) return;
@@ -233,8 +255,6 @@ public class ElementDamageHandler {
 		int chunkX = event.getChunk().getPos().x;
 		int chunkZ = event.getChunk().getPos().z;
 
-		// Этот метод только помечает сущности на удаление (добавляет в очередь),
-		// чтобы не вызвать ConcurrentModificationException во время сохранения чанка.
 		int markedCount = displayManager.cleanupDisplaysInChunk(level, chunkX, chunkZ);
 
 		if (markedCount > 0) {
@@ -243,9 +263,11 @@ public class ElementDamageHandler {
 		}
 	}
 
-	// === ЛОГИКА ОПРЕДЕЛЕНИЯ ЭЛЕМЕНТА ===
+	// === ЛОГИКА ОПРЕДЕЛЕНИЯ ЭЛЕМЕНТА (ОБНОВЛЕННАЯ) ===
 	private static ElementType getElementTypeFromSource(DamageSource source) {
 		Entity directEntity = source.getDirectEntity();
+
+		// 1. Приоритет: Снаряды мода
 		if (directEntity != null) {
 			Optional<ElementType> registryElement = ElementalProjectileRegistry.getElementForEntity(directEntity);
 			if (registryElement.isPresent()) {
@@ -256,6 +278,7 @@ public class ElementDamageHandler {
 			}
 		}
 
+		// 2. Приоритет: Оружие и мобы мода
 		Entity causingEntity = source.getEntity();
 		if (causingEntity instanceof LivingEntity attacker) {
 			ItemStack weapon = attacker.getMainHandItem();
@@ -266,9 +289,21 @@ public class ElementDamageHandler {
 			if (registryType != null) return registryType;
 		}
 
+		// 3. FALLBACK: Определение по ванильному типу урона (НОВОЕ!)
 		String msgId = source.type().msgId();
-		for (ElementType type : ElementType.values()) {
-			if (type.getDamageTypeId().equals(msgId)) return type;
+		if (msgId != null) {
+			// Пытаемся найти точное совпадение по ID урона (если вы регистрировали свои DamageType)
+			for (ElementType type : ElementType.values()) {
+				if (type.getDamageTypeId().equals(msgId) || type.getFullDamageTypeId().equals(msgId)) {
+					return type;
+				}
+			}
+
+			// Если не нашли, используем маппер ванильных типов
+			ElementType vanillaType = ElementType.fromVanillaDamageType(msgId);
+			if (vanillaType != null) {
+				return vanillaType;
+			}
 		}
 
 		LegendsOfTheStones.LOGGER.debug("No matching ElementType for source: {}", source);
@@ -395,6 +430,7 @@ public class ElementDamageHandler {
 		return ElementDamageDisplayManager.getAllDamageColors();
 	}
 
+	// === ОБНОВЛЕННЫЙ МЕТОД: с учетом новых эффектов и исправлениями ===
 	private static float applyThresholdEffect(LivingEntity target, ElementType type, LivingDamageEvent.Pre event, float currentDamage) {
 		LegendsOfTheStones.LOGGER.info("THRESHOLD REACHED! Entity: {}, Type: {}", target.getName().getString(), type);
 		return switch (type) {

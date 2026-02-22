@@ -2,7 +2,6 @@
   "replace": false,
   "values": [
     "minecraft:snow_golem",
-    "minecraft:dolphin",
-    "#minecraft:fish"
+    "minecraft:dolphin"
   ]
 }

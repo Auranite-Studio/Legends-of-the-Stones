@@ -1,5 +1,6 @@
 package com.auranite.legendsofthestones.legendsofthestones;
 
+import net.minecraft.core.HolderLookup;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 

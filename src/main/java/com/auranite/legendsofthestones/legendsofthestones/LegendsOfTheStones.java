@@ -1,6 +1,7 @@
 package com.auranite.legendsofthestones.legendsofthestones;
 
-import net.minecraft.core.HolderLookup;
+import net.minecraft.server.level.ServerLevel;
+import net.neoforged.neoforge.event.level.LevelEvent;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 
@@ -32,6 +33,9 @@ public class LegendsOfTheStones {
     public static final Logger LOGGER = LogManager.getLogger(LegendsOfTheStones.class);
     public static final String MODID = "lgstones";
 
+    private static LegendsOfTheStones instance;
+    private ElementDamageDisplayManager damageDisplayManager;
+
     public LegendsOfTheStones(IEventBus modEventBus) {
         // Start of user code block mod constructor
         // End of user code block mod constructor
@@ -39,7 +43,6 @@ public class LegendsOfTheStones {
         modEventBus.addListener(this::registerNetworking);
         // Start of user code block mod init
         LegendsOfTheStonesAttachments.ATTACHMENT_TYPES.register(modEventBus);
-        LegendsOfTheStonesDamageTypes.DAMAGE_TYPES.register(modEventBus);
         ElementResistanceRegistry.init();
         ElementResistanceManager.debugPrintRegistry();
         ElementDamageDisplayManager displayManager = new ElementDamageDisplayManager();
@@ -79,6 +82,29 @@ public class LegendsOfTheStones {
     }
 
     @SubscribeEvent
+    public void onLevelUnload(LevelEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel) {
+            if (damageDisplayManager != null) {
+                damageDisplayManager.onLevelUnload(serverLevel);
+            }
+        }
+    }
+
+    /**
+     * Периодическая очистка "зомби" дисплеев (на случай если цель исчезла без смерти и т.п.).
+     * Запускается раз в секунду (20 тиков).
+     */
+    @SubscribeEvent
+    public void onServerTick(ServerTickEvent.Post event) {
+        if (event.getServer().getTickCount() % 20 == 0) {
+            if (damageDisplayManager != null) {
+                damageDisplayManager.cleanupStaleDisplays();
+            }
+        }
+    }
+
+
+    @SubscribeEvent
     public void tick(ServerTickEvent.Post event) {
         List<Tuple<Runnable, Integer>> actions = new ArrayList<>();
         workQueue.forEach(work -> {
@@ -88,5 +114,16 @@ public class LegendsOfTheStones {
         });
         actions.forEach(e -> e.getA().run());
         workQueue.removeAll(actions);
+    }
+    private static final java.util.List<PendingTask> pendingTasks = new java.util.ArrayList<>();
+
+    private static void addPendingTask(Runnable task, int delayTicks) {
+        pendingTasks.add(new PendingTask(task, delayTicks));
+    }
+
+    private static class PendingTask {
+        Runnable runnable;
+        int ticksLeft;
+        PendingTask(Runnable r, int t) { runnable = r; ticksLeft = t; }
     }
 }

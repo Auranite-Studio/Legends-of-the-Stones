@@ -1,6 +1,9 @@
-
 package com.auranite.legendsofthestones.legendsofthestones;
 
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 
 import java.util.EnumMap;
@@ -10,254 +13,181 @@ public class ElementResistanceRegistry {
 
     private ElementResistanceRegistry() {}
 
-    public static void init() {
-        LegendsOfTheStones.LOGGER.info("Initializing Element Resistance Registry...");
-        LegendsOfTheStones.LOGGER.info("ElementType.FIRE.getDamageTypeId() = {}", ElementType.FIRE.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.PHYSICAL.getDamageTypeId() = {}", ElementType.PHYSICAL.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.WIND.getDamageTypeId() = {}", ElementType.WIND.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.WATER.getDamageTypeId() = {}", ElementType.WATER.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.EARTH.getDamageTypeId() = {}", ElementType.EARTH.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.ICE.getDamageTypeId() = {}", ElementType.ICE.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.ELECTRIC.getDamageTypeId() = {}", ElementType.ELECTRIC.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.SOURCE.getDamageTypeId() = {}", ElementType.SOURCE.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.NATURAL.getDamageTypeId() = {}", ElementType.NATURAL.getDamageTypeId());
-        LegendsOfTheStones.LOGGER.info("ElementType.QUANTUM.getDamageTypeId() = {}", ElementType.QUANTUM.getDamageTypeId());
+    // ═══════════════════════════════════════════════════════════
+    // СОЗДАНИЕ TAGKEY
+    // ═══════════════════════════════════════════════════════════
 
+    public static TagKey<EntityType<?>> createEntityTag(String element, String modifier) {
+        return TagKey.create(Registries.ENTITY_TYPE,
+                ResourceLocation.fromNamespaceAndPath(LegendsOfTheStones.MODID,
+                        "element/" + element.toLowerCase() + "/" + modifier));
+    }
 
-        registerUniform(ElementType.FIRE, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.PHYSICAL, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.WIND, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.WATER, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.EARTH, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.ICE, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.ELECTRIC, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.SOURCE, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.NATURAL, 0.0f, 0.0f, EntityType.PLAYER);
-        registerUniform(ElementType.QUANTUM, 0.0f, 0.0f, EntityType.PLAYER);
+    // ═══════════════════════════════════════════════════════════
+    // ИНИЦИАЛИЗАЦИЯ
+    // ═══════════════════════════════════════════════════════════
+
+    public static void init(net.minecraft.core.HolderLookup.Provider lookupProvider) {
+        LegendsOfTheStones.LOGGER.info("Initializing Element Resistance Registry (Tag-based)...");
 
         try {
-            registerFireResistances();
-            registerPhysicalResistances();
-            registerEarthResistances();
-            registerWaterResistances();
-            registerWindResistances();
-            registerNaturalResistances();
-            registerQuantumResistances();
-            registerIceResistances();
-            registerElectricResistances();
+            for (ElementType elementType : ElementType.values()) {
+                String tagName = elementType.name().toLowerCase();
+
+                ElementResistanceManager.loadFromTag(
+                        elementType,
+                        createEntityTag(tagName, "immune"),
+                        ElementResistanceManager.Resistance.IMMUNE,
+                        lookupProvider
+                );
+
+                ElementResistanceManager.loadFromTag(
+                        elementType,
+                        createEntityTag(tagName, "resistance"),
+                        ElementResistanceManager.Resistance.HALF_RESIST,
+                        lookupProvider
+                );
+
+                ElementResistanceManager.loadFromTag(
+                        elementType,
+                        createEntityTag(tagName, "weakness"),
+                        ElementResistanceManager.Resistance.WEAKNESS,
+                        lookupProvider
+                );
+            }
 
             LegendsOfTheStones.LOGGER.info("Element Resistance Registry initialized! Total: {} entities",
                     ElementResistanceManager.getRegisteredEntityCount());
+
         } catch (Exception e) {
             LegendsOfTheStones.LOGGER.error("Failed to initialize Element Resistance Registry!", e);
-            e.printStackTrace();
         }
     }
 
-    private static void registerFireResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering FIRE resistances...");
-
-        registerUniform(ElementType.FIRE, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.FIRE, -0.25f, -0.25f
-        );
-
-        registerUniform(ElementType.FIRE, 0.5f, 0.5f
-        );
+    public static void init() {
+        LegendsOfTheStones.LOGGER.info("Initializing Element Resistance Registry (Lazy tag loading)...");
     }
 
-    private static void registerPhysicalResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering PHYSICAL resistances...");
-
-        registerUniform(ElementType.PHYSICAL, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.PHYSICAL, 0.5f, 0.5f,
-                EntityType.IRON_GOLEM
-        );
-
-        registerUniform(ElementType.PHYSICAL, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.PHYSICAL, 0.0f, -0.5f
-        );
-    }
-
-    private static void registerWindResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering WIND resistances...");
-
-        registerUniform(ElementType.WIND, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.WIND, 0.5f, 0.5f,
-                EntityType.IRON_GOLEM
-        );
-
-        registerUniform(ElementType.WIND, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.WIND, 0.0f, -0.5f
-        );
-    }
-
-    private static void registerEarthResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering EARTH resistances...");
-
-        registerUniform(ElementType.EARTH, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.EARTH, 0.5f, 0.5f
-        );
-
-        registerUniform(ElementType.EARTH, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.EARTH, 0.0f, -0.5f
-        );
-    }
-
-    private static void registerWaterResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering WATER resistances...");
-
-        registerUniform(ElementType.WATER, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.WATER, 0.5f, 0.5f
-        );
-
-        registerUniform(ElementType.WATER, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.WATER, 0.0f, -0.5f,
-                EntityType.IRON_GOLEM
-        );
-    }
-
-    private static void registerIceResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering ICE resistances...");
-
-        registerUniform(ElementType.ICE, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.ICE, 0.5f, 0.5f
-        );
-
-        registerUniform(ElementType.ICE, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.ICE, 0.0f, -0.5f
-        );
-    }
-
-    private static void registerElectricResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering ELECTRIC resistances...");
-
-        registerUniform(ElementType.ELECTRIC, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.ELECTRIC, 0.5f, 0.5f
-        );
-
-        registerUniform(ElementType.ELECTRIC, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.ELECTRIC, 0.0f, -0.5f
-        );
-    }
-
-    private static void registerSourceResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering SOURCE resistances...");
-
-        registerUniform(ElementType.SOURCE, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.SOURCE, 0.5f, 0.5f
-        );
-
-        registerUniform(ElementType.SOURCE, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.SOURCE, 0.0f, -0.5f
-        );
-    }
-
-    private static void registerNaturalResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering NATURAL resistances...");
-
-        registerUniform(ElementType.NATURAL, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.NATURAL, 0.5f, 0.5f
-        );
-
-        registerUniform(ElementType.NATURAL, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.NATURAL, 0.0f, -0.5f
-        );
-    }
-
-    private static void registerQuantumResistances() {
-        LegendsOfTheStones.LOGGER.debug("Registering QUANTUM resistances...");
-
-        registerUniform(ElementType.QUANTUM, 1.0f, 1.0f
-        );
-
-        registerUniform(ElementType.QUANTUM, 0.5f, 0.5f
-        );
-
-        registerUniform(ElementType.QUANTUM, 0.25f, 0.25f
-        );
-
-        registerCustom(ElementType.QUANTUM, 0.0f, -0.5f
-        );
-    }
-
+    // ═══════════════════════════════════════════════════════════
+    // ПРОГРАММНАЯ РЕГИСТРАЦИЯ
+    // ═══════════════════════════════════════════════════════════
 
     @SafeVarargs
-    private static void registerUniform(ElementType elementType, float resistance, EntityType<?>... entityTypes) {
+    public static void registerUniform(ElementType elementType, float resistance, EntityType<?>... entityTypes) {
         registerUniform(elementType, resistance, resistance, entityTypes);
     }
 
     @SafeVarargs
-    private static void registerUniform(ElementType elementType, float accumulationResistance, float damageResistance, EntityType<?>... entityTypes) {
-        for (EntityType<?> type : entityTypes) {
-            if (type == null) continue;
-            Map<ElementType, ElementResistanceManager.Resistance> map = new EnumMap<>(ElementType.class);
-            map.put(elementType, new ElementResistanceManager.Resistance(accumulationResistance, damageResistance));
-            ElementResistanceManager.registerResistance(type, map);
-        }
-    }
+    public static void registerUniform(ElementType elementType, float accumulationResistance,
+                                       float damageResistance, EntityType<?>... entityTypes) {
+        if (elementType == null || entityTypes == null) return;
 
-    @SafeVarargs
-    private static void registerCustom(ElementType elementType, float accumulationResistance, float damageResistance, EntityType<?>... entityTypes) {
         for (EntityType<?> type : entityTypes) {
             if (type == null) continue;
-            Map<ElementType, ElementResistanceManager.Resistance> map = new EnumMap<>(ElementType.class);
-            map.put(elementType, new ElementResistanceManager.Resistance(accumulationResistance, damageResistance));
-            ElementResistanceManager.registerResistance(type, map);
+            ElementResistanceManager.registerResistance(type, Map.of(
+                    elementType, new ElementResistanceManager.Resistance(accumulationResistance, damageResistance)
+            ));
         }
     }
 
     public static void registerSingle(EntityType<?> entityType, ElementType elementType,
                                       float accumulationResistance, float damageResistance) {
         if (entityType == null || elementType == null) return;
-        Map<ElementType, ElementResistanceManager.Resistance> map = new EnumMap<>(ElementType.class);
-        map.put(elementType, new ElementResistanceManager.Resistance(accumulationResistance, damageResistance));
-        ElementResistanceManager.registerResistance(entityType, map);
+        ElementResistanceManager.registerResistance(entityType, Map.of(
+                elementType, new ElementResistanceManager.Resistance(accumulationResistance, damageResistance)
+        ));
     }
 
     public static void registerSingleUniform(EntityType<?> entityType, ElementType elementType, float resistance) {
         registerSingle(entityType, elementType, resistance, resistance);
     }
 
-    public static void registerMultiple(EntityType<?> entityType, Map<ElementType, ElementResistanceManager.Resistance> resistanceMap) {
+    public static void registerMultiple(EntityType<?> entityType,
+                                        Map<ElementType, ElementResistanceManager.Resistance> resistanceMap) {
         if (entityType == null || resistanceMap == null || resistanceMap.isEmpty()) return;
         ElementResistanceManager.registerResistance(entityType, new EnumMap<>(resistanceMap));
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // УТИЛИТЫ (Исправленные типы)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Проверка по EntityType
+     */
     public static boolean hasResistances(EntityType<?> entityType) {
-        return entityType != null && ElementResistanceManager.getRegisteredEntityCount() > 0;
+        return ElementResistanceManager.hasResistanceFor(entityType);
+    }
+
+    /**
+     * Проверка по экземпляру Entity
+     */
+    public static boolean hasResistances(Entity entity) {
+        if (entity == null) return false;
+        return ElementResistanceManager.hasResistanceFor(entity.getType());
+    }
+
+    public static boolean hasResistance(EntityType<?> entityType, ElementType elementType) {
+        return ElementResistanceManager.hasResistanceFor(entityType, elementType);
+    }
+
+    public static ElementResistanceManager.Resistance getResistance(EntityType<?> entityType, ElementType elementType) {
+        return ElementResistanceManager.getResistance(entityType, elementType);
+    }
+
+    public static void clearAll() {
+        ElementResistanceManager.clearAllResistances();
+    }
+
+    public static void debugPrint() {
+        ElementResistanceManager.debugPrintRegistry();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // КОНСТАНТЫ
+    // ═══════════════════════════════════════════════════════════
+
+    public static final class Tags {
+        private Tags() {}
+
+        public static final TagKey<EntityType<?>> FIRE_IMMUNE = createEntityTag("fire", "immune");
+        public static final TagKey<EntityType<?>> FIRE_RESISTANCE = createEntityTag("fire", "resistance");
+        public static final TagKey<EntityType<?>> FIRE_WEAKNESS = createEntityTag("fire", "weakness");
+
+        public static final TagKey<EntityType<?>> WATER_IMMUNE = createEntityTag("water", "immune");
+        public static final TagKey<EntityType<?>> WATER_RESISTANCE = createEntityTag("water", "resistance");
+        public static final TagKey<EntityType<?>> WATER_WEAKNESS = createEntityTag("water", "weakness");
+
+        public static final TagKey<EntityType<?>> EARTH_IMMUNE = createEntityTag("earth", "immune");
+        public static final TagKey<EntityType<?>> EARTH_RESISTANCE = createEntityTag("earth", "resistance");
+        public static final TagKey<EntityType<?>> EARTH_WEAKNESS = createEntityTag("earth", "weakness");
+
+        public static final TagKey<EntityType<?>> WIND_IMMUNE = createEntityTag("wind", "immune");
+        public static final TagKey<EntityType<?>> WIND_RESISTANCE = createEntityTag("wind", "resistance");
+        public static final TagKey<EntityType<?>> WIND_WEAKNESS = createEntityTag("wind", "weakness");
+
+        public static final TagKey<EntityType<?>> ICE_IMMUNE = createEntityTag("ice", "immune");
+        public static final TagKey<EntityType<?>> ICE_RESISTANCE = createEntityTag("ice", "resistance");
+        public static final TagKey<EntityType<?>> ICE_WEAKNESS = createEntityTag("ice", "weakness");
+
+        public static final TagKey<EntityType<?>> ELECTRIC_IMMUNE = createEntityTag("electric", "immune");
+        public static final TagKey<EntityType<?>> ELECTRIC_RESISTANCE = createEntityTag("electric", "resistance");
+        public static final TagKey<EntityType<?>> ELECTRIC_WEAKNESS = createEntityTag("electric", "weakness");
+
+        public static final TagKey<EntityType<?>> PHYSICAL_IMMUNE = createEntityTag("physical", "immune");
+        public static final TagKey<EntityType<?>> PHYSICAL_RESISTANCE = createEntityTag("physical", "resistance");
+        public static final TagKey<EntityType<?>> PHYSICAL_WEAKNESS = createEntityTag("physical", "weakness");
+
+        public static final TagKey<EntityType<?>> SOURCE_IMMUNE = createEntityTag("source", "immune");
+        public static final TagKey<EntityType<?>> SOURCE_RESISTANCE = createEntityTag("source", "resistance");
+        public static final TagKey<EntityType<?>> SOURCE_WEAKNESS = createEntityTag("source", "weakness");
+
+        public static final TagKey<EntityType<?>> NATURAL_IMMUNE = createEntityTag("natural", "immune");
+        public static final TagKey<EntityType<?>> NATURAL_RESISTANCE = createEntityTag("natural", "resistance");
+        public static final TagKey<EntityType<?>> NATURAL_WEAKNESS = createEntityTag("natural", "weakness");
+
+        public static final TagKey<EntityType<?>> QUANTUM_IMMUNE = createEntityTag("quantum", "immune");
+        public static final TagKey<EntityType<?>> QUANTUM_RESISTANCE = createEntityTag("quantum", "resistance");
+        public static final TagKey<EntityType<?>> QUANTUM_WEAKNESS = createEntityTag("quantum", "weakness");
     }
 }

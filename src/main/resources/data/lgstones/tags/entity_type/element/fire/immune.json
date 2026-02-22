@@ -1,0 +1,11 @@
+{
+  "replace": false,
+  "values": [
+    "minecraft:blaze",
+    "minecraft:magma_cube",
+    "minecraft:wither",
+    "minecraft:ender_dragon",
+    "minecraft:strider",
+    "minecraft:zombified_piglin"
+  ]
+}

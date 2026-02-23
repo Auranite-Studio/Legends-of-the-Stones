@@ -398,7 +398,7 @@ public class ElementDamageHandler {
 		LegendsOfTheStones.LOGGER.info("THRESHOLD REACHED! Entity: {}, Type: {}", target.getName().getString(), type);
 		return switch (type) {
 			case FIRE -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BURNING, 200, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BURNING, 200, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.overheating"), 0xFF5500);
 				yield currentDamage;
 			}
@@ -407,42 +407,42 @@ public class ElementDamageHandler {
 				yield currentDamage * 5.0f;
 			}
 			case WIND -> {
-				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1, false, false));
+				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.wind_whirlwind"), 0x00FFFF);
 				yield currentDamage;
 			}
 			case WATER -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.WETNESS, 300, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.WETNESS, 300, 1, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.water_flood"), 0x0080FF);
 				yield currentDamage;
 			}
 			case EARTH -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.STUN, 60, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.STUN, 60, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.earth_petrify"), 0x8B4513);
 				yield currentDamage;
 			}
 			case ICE -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.FREEZE, 160, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.FREEZE, 160, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.ice_freeze"), 0x00BFFF);
 				yield currentDamage;
 			}
 			case ELECTRIC -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.SHOCK, 140, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.SHOCK, 140, 1, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.electric_shock"), 0xFFFF00);
 				yield currentDamage;
 			}
 			case SOURCE -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.RIFT, 100, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.RIFT, 100, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.source_void"), 0x9932CC);
 				yield currentDamage;
 			}
 			case NATURAL -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BLOOM, 120, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BLOOM, 120, 1, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.natural_bloom"), 0x32CD32);
 				yield currentDamage;
 			}
 			case QUANTUM -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BREAK, 100, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BREAK, 100, 1, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.quantum_flux"), 0xFF00FF);
 				yield currentDamage;
 			}
@@ -454,7 +454,7 @@ public class ElementDamageHandler {
 		LegendsOfTheStones.LOGGER.info("THRESHOLD REACHED! Entity: {}, Type: {}", target.getName().getString(), type);
 		return switch (type) {
 			case FIRE -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BURNING, 200, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BURNING, 200, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.overheating"), 0xFF5500);
 				yield originalDamage;
 			}
@@ -463,42 +463,42 @@ public class ElementDamageHandler {
 				yield originalDamage * 5.0f;
 			}
 			case WIND -> {
-				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1, false, false));
+				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.wind_whirlwind"), 0x00FFFF);
 				yield originalDamage;
 			}
 			case WATER -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.WETNESS, 300, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.WETNESS, 300, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.water_flood"), 0x0080FF);
 				yield originalDamage;
 			}
 			case EARTH -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.STUN, 60, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.STUN, 60, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.earth_petrify"), 0x8B4513);
 				yield originalDamage;
 			}
 			case ICE -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.FREEZE, 160, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.FREEZE, 160, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.ice_freeze"), 0x00BFFF);
 				yield originalDamage;
 			}
 			case ELECTRIC -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.SHOCK, 140, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.SHOCK, 140, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.electric_shock"), 0xFFFF00);
 				yield originalDamage;
 			}
 			case SOURCE -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.RIFT, 100, 0, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.RIFT, 100, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.source_void"), 0x9932CC);
 				yield originalDamage;
 			}
 			case NATURAL -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BLOOM, 120, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BLOOM, 120, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.natural_bloom"), 0x32CD32);
 				yield originalDamage;
 			}
 			case QUANTUM -> {
-				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BREAK, 100, 1, false, false));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BREAK, 100, 0, false, true));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.quantum_flux"), 0xFF00FF);
 				yield originalDamage;
 			}

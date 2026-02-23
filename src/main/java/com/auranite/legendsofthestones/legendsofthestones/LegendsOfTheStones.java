@@ -40,6 +40,7 @@ public class LegendsOfTheStones {
         modEventBus.addListener(this::registerNetworking);
         // Start of user code block mod init
         LegendsOfTheStonesAttachments.ATTACHMENT_TYPES.register(modEventBus);
+        LegendsOfTheStonesMobEffects.REGISTRY.register(modEventBus);
         ElementResistanceRegistry.init();
         ElementResistanceManager.debugPrintRegistry();
         ElementDamageDisplayManager displayManager = new ElementDamageDisplayManager();

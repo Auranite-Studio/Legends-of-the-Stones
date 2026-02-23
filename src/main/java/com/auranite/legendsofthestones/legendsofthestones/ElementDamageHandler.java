@@ -12,6 +12,7 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
@@ -54,7 +55,6 @@ public class ElementDamageHandler {
 
 	// === ИНИЦИАЛИЗАЦИЯ ЦВЕТОВ ===
 	public static void initDamageColors() {
-		// Базовые элементы
 		ElementDamageDisplayManager.registerDamageColor(ElementType.FIRE, 0xFF5500);
 		ElementDamageDisplayManager.registerDamageColor(ElementType.PHYSICAL, 0xFFAA00);
 		ElementDamageDisplayManager.registerDamageColor(ElementType.WIND, 0x00FFFF);
@@ -72,7 +72,6 @@ public class ElementDamageHandler {
 	public static void onServerTick(ServerTickEvent.Pre event) {
 		currentServer = event.getServer();
 
-		// Обработка отложенных удалений
 		if (displayManager != null) {
 			displayManager.processPendingRemovals();
 		}
@@ -87,17 +86,17 @@ public class ElementDamageHandler {
 		}
 	}
 
-	@SubscribeEvent
+	@SubscribeEvent(priority = EventPriority.HIGHEST) // ✅ Запускается ПОСЛЕДНИМ
 	public static void onLivingHurt(LivingDamageEvent.Pre event) {
 		LivingEntity target = event.getEntity();
 		DamageSource source = event.getSource();
 
-		// 1. Определение типа элемента (включая ванильные типы)
 		ElementType type = getElementTypeFromSource(source);
 
 		if (type == null) {
 			if (canShowDamage(target)) {
-				spawnDamageNumber(target, event.getOriginalDamage(), null);
+				// ✅ Отображаем урон ПОСЛЕ всех модификаторов
+				spawnDamageNumber(target, event.getNewDamage(), null);
 			}
 			return;
 		}
@@ -105,7 +104,6 @@ public class ElementDamageHandler {
 		// === РАСЧЁТ МНОЖИТЕЛЯ НАКОПЛЕНИЯ ===
 		float effectiveAccumMultiplier = 1.0f;
 
-		// 1. Приоритет: множитель из самого снаряда
 		if (source.getDirectEntity() != null) {
 			Optional<Float> projectileAccum = ElementalProjectileRegistry.getAccumulationMultiplierForEntity(source.getDirectEntity());
 			if (projectileAccum.isPresent()) {
@@ -114,7 +112,6 @@ public class ElementDamageHandler {
 			}
 		}
 
-		// 2. Fallback: множитель из оружия атакующего
 		if (effectiveAccumMultiplier == 1.0f && source.getEntity() instanceof LivingEntity attacker) {
 			ItemStack weapon = attacker.getMainHandItem();
 			float weaponAccum = ElementalWeaponRegistry.getAccumulationMultiplier(weapon);
@@ -147,52 +144,20 @@ public class ElementDamageHandler {
 		LegendsOfTheStones.LOGGER.info("[Resonance] Target: {} | Element: {} | Multiplier: x{} | Points: {} +{} → {} | Breakthrough: {}",
 				target.getName().getString(), type, effectiveAccumMultiplier, pointsBefore, pointsToAdd, pointsAfter, thresholdReached);
 
-		float finalDamage = event.getOriginalDamage();
+		float finalDamage = event.getNewDamage(); // ✅ Берём уже модифицированный урон!
 		float originalDamage = finalDamage;
 
-		// Применяем базовое сопротивление элемента
+		// Применяем сопротивление элемента (если ещё не применено)
 		finalDamage = ElementResistanceManager.calculateReducedDamage(target, type, finalDamage);
-
-		// ========================================================================
-		// === НОВАЯ ЛОГИКА: УЧЕТ ГЛОБАЛЬНЫХ СТАТУСОВ (Раскол, Цветение, Пробой) ===
-		// ========================================================================
-
-//		if (target.hasEffect(PowerModMobEffects.RIFT.get())) {
-//			int amp = target.getEffect(PowerModMobEffects.RIFT.get()).getAmplifier();
-//			float multiplier = 1.0f + (0.20f * (amp + 1));
-//			finalDamage *= multiplier;
-//
-//			if (target.tickCount % 20 == 0 && !target.level().isClientSide) {
-//				((ServerLevel)target.level()).sendParticles(net.minecraft.core.particles.ParticleTypes.PORTAL,
-//						target.getX(), target.getY() + 1, target.getZ(), 2, 0.5, 0.5, 0.5, 0.01);
-//			}
-//		}
-//
-//		if (target.hasEffect(PowerModMobEffects.BLOOM.get())) {
-//			int amp = target.getEffect(PowerModMobEffects.BLOOM.get()).getAmplifier();
-//			float vulnerability = 1.0f + (0.10f * (amp + 1));
-//			finalDamage *= vulnerability;
-//		}
-//
-//		if (target.hasEffect(PowerModMobEffects.PHASE_SHIFT.get())) {
-//			finalDamage = Math.max(finalDamage, originalDamage);
-//
-//			if (!target.level().isClientSide) {
-//				((ServerLevel)target.level()).sendParticles(net.minecraft.core.particles.ParticleTypes.END_ROD,
-//						target.getX(), target.getY() + 1, target.getZ(), 3, 0.3, 0.3, 0.3, 0.05);
-//			}
-//		}
-		// ========================================================================
 
 		if (thresholdReached) {
 			finalDamage = applyThresholdEffect(target, type, event, finalDamage);
 			LegendsOfTheStonesAttachments.resetPoints(target, type);
-			LegendsOfTheStones.LOGGER.info("✨ {}! Entity: {}, Type: {} Resonance Breakthrough",
-					target.getName().getString(), type);
 		}
 
 		event.setNewDamage(finalDamage);
 
+		// ✅ Отображаем ФИНАЛЬНЫЙ урон после ВСЕХ модификаторов
 		if (canShowDamage(target)) {
 			spawnDamageNumber(target, finalDamage, type);
 		}
@@ -219,9 +184,7 @@ public class ElementDamageHandler {
 
 	@SubscribeEvent
 	public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-		if (!(event.getEntity() instanceof ServerPlayer player)) {
-			return;
-		}
+		if (!(event.getEntity() instanceof ServerPlayer player)) return;
 
 		LegendsOfTheStones.LOGGER.info("Player {} logged out. Force cleaning all damage displays immediately.", player.getName().getString());
 
@@ -247,38 +210,30 @@ public class ElementDamageHandler {
 	@SubscribeEvent
 	public static void onChunkUnload(ChunkDataEvent.Save event) {
 		if (displayManager == null) return;
-
-		if (!(event.getLevel() instanceof ServerLevel level)) {
-			return;
-		}
+		if (!(event.getLevel() instanceof ServerLevel level)) return;
 
 		int chunkX = event.getChunk().getPos().x;
 		int chunkZ = event.getChunk().getPos().z;
 
 		int markedCount = displayManager.cleanupDisplaysInChunk(level, chunkX, chunkZ);
-
 		if (markedCount > 0) {
 			LegendsOfTheStones.LOGGER.debug("Marked {} visual effects for removal from unloading chunk [{}, {}]",
 					markedCount, chunkX, chunkZ);
 		}
 	}
 
-	// === ЛОГИКА ОПРЕДЕЛЕНИЯ ЭЛЕМЕНТА (ОБНОВЛЕННАЯ) ===
+	// === ЛОГИКА ОПРЕДЕЛЕНИЯ ЭЛЕМЕНТА ===
 	private static ElementType getElementTypeFromSource(DamageSource source) {
 		Entity directEntity = source.getDirectEntity();
 
-		// 1. Приоритет: Снаряды мода
 		if (directEntity != null) {
 			Optional<ElementType> registryElement = ElementalProjectileRegistry.getElementForEntity(directEntity);
-			if (registryElement.isPresent()) {
-				return registryElement.get();
-			}
+			if (registryElement.isPresent()) return registryElement.get();
 			if (LegendsOfTheStonesAttachments.hasProjectileElement(directEntity)) {
 				return LegendsOfTheStonesAttachments.getProjectileElement(directEntity);
 			}
 		}
 
-		// 2. Приоритет: Оружие и мобы мода
 		Entity causingEntity = source.getEntity();
 		if (causingEntity instanceof LivingEntity attacker) {
 			ItemStack weapon = attacker.getMainHandItem();
@@ -289,21 +244,15 @@ public class ElementDamageHandler {
 			if (registryType != null) return registryType;
 		}
 
-		// 3. FALLBACK: Определение по ванильному типу урона (НОВОЕ!)
 		String msgId = source.type().msgId();
 		if (msgId != null) {
-			// Пытаемся найти точное совпадение по ID урона (если вы регистрировали свои DamageType)
 			for (ElementType type : ElementType.values()) {
 				if (type.getDamageTypeId().equals(msgId) || type.getFullDamageTypeId().equals(msgId)) {
 					return type;
 				}
 			}
-
-			// Если не нашли, используем маппер ванильных типов
 			ElementType vanillaType = ElementType.fromVanillaDamageType(msgId);
-			if (vanillaType != null) {
-				return vanillaType;
-			}
+			if (vanillaType != null) return vanillaType;
 		}
 
 		LegendsOfTheStones.LOGGER.debug("No matching ElementType for source: {}", source);
@@ -392,27 +341,19 @@ public class ElementDamageHandler {
 
 	// === ДЕЛЕГИРОВАНИЕ ВИЗУАЛИЗАЦИИ ===
 	private static void clearActiveDisplays(LivingEntity entity) {
-		if (displayManager != null) {
-			displayManager.clearActiveDisplays(entity);
-		}
+		if (displayManager != null) displayManager.clearActiveDisplays(entity);
 	}
 
 	private static void spawnDamageNumber(LivingEntity entity, float amount, ElementType type) {
-		if (displayManager != null) {
-			displayManager.spawnDamageNumber(entity, amount, type);
-		}
+		if (displayManager != null) displayManager.spawnDamageNumber(entity, amount, type);
 	}
 
 	public static void spawnStatusText(LivingEntity entity, Component textComponent, int color) {
-		if (displayManager != null) {
-			displayManager.spawnStatusText(entity, textComponent, color);
-		}
+		if (displayManager != null) displayManager.spawnStatusText(entity, textComponent, color);
 	}
 
 	public static void spawnStatusText(LivingEntity entity, String text, int color) {
-		if (displayManager != null) {
-			displayManager.spawnStatusText(entity, text, color);
-		}
+		if (displayManager != null) displayManager.spawnStatusText(entity, text, color);
 	}
 
 	// === ПОРОГОВЫЕ ЭФФЕКТЫ ===
@@ -430,12 +371,14 @@ public class ElementDamageHandler {
 		return ElementDamageDisplayManager.getAllDamageColors();
 	}
 
-	// === ОБНОВЛЕННЫЙ МЕТОД: с учетом новых эффектов и исправлениями ===
+	// === ПРИМЕНЕНИЕ ЭФФЕКТОВ ПРИ ПРОРЫВЕ (ТОЛЬКО ЭФФЕКТ) ===
 	private static float applyThresholdEffect(LivingEntity target, ElementType type, LivingDamageEvent.Pre event, float currentDamage) {
 		LegendsOfTheStones.LOGGER.info("THRESHOLD REACHED! Entity: {}, Type: {}", target.getName().getString(), type);
+
 		return switch (type) {
 			case FIRE -> {
-				target.igniteForSeconds(5);
+				// 🔥 Горение (DoT)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BURNING, 200, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.overheating"), 0xFF5500);
 				yield currentDamage;
 			}
@@ -444,74 +387,52 @@ public class ElementDamageHandler {
 				yield currentDamage * 5.0f;
 			}
 			case WIND -> {
-				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1));
-				target.push(0, 0.5, 0);
+				// 🌪️ Левитация (Контроль)
+				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.wind_whirlwind"), 0x00FFFF);
 				yield currentDamage;
 			}
 			case WATER -> {
-				target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 100, 1));
-				target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 100, 0));
-				if (target.isOnFire()) target.extinguishFire();
+				// 💧 Промокание (Дебафф для комбо)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.WETNESS, 300, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.water_flood"), 0x0080FF);
 				yield currentDamage;
 			}
 			case EARTH -> {
-				target.addEffect(new MobEffectInstance(MobEffects.OOZING, 80, 4));
+				// 🌍 Оглушение (Контроль)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.STUN, 60, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.earth_petrify"), 0x8B4513);
-				yield currentDamage * 1.5f;
+				yield currentDamage;
 			}
 			case ICE -> {
-				target.setTicksFrozen(160);
-				if (target.isOnFire()) {
-					target.extinguishFire();
-					target.hurt(target.damageSources().magic(), 2.0f);
-				}
+				// ❄️ Заморозка (Замедление/Урон)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.FREEZE, 160, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.ice_freeze"), 0x00BFFF);
-				yield currentDamage * 1.25f;
+				yield currentDamage;
 			}
 			case ELECTRIC -> {
-				target.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 40, 0));
-				target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 60, 1));
-				if (!target.level().isClientSide) {
-					target.level().getEntitiesOfClass(LivingEntity.class, target.getBoundingBox().inflate(3.0),
-							e -> e != target && e.isAlive()).forEach(e -> {
-						e.hurt(target.damageSources().magic(), currentDamage * 0.5f);
-						e.igniteForSeconds(2);
-					});
-				}
+				// ⚡ Шок (Снижение урона цели)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.SHOCK, 140, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.electric_shock"), 0xFFFF00);
-				yield currentDamage * 1.5f;
+				yield currentDamage;
 			}
 			case SOURCE -> {
-				var random = target.level().random;
-				switch (random.nextInt(4)) {
-					case 0 -> target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 100, 1));
-					case 1 -> target.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 80, 0));
-					case 2 -> target.addEffect(new MobEffectInstance(MobEffects.HUNGER, 120, 0));
-					case 3 -> target.addEffect(new MobEffectInstance(MobEffects.WITHER, 40, 0));
-				}
+				// 🌑 Разлом (Игнор брони)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.RIFT, 100, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.source_void"), 0x9932CC);
-				yield currentDamage * 2.0f;
+				yield currentDamage;
 			}
 			case NATURAL -> {
-				target.addEffect(new MobEffectInstance(MobEffects.POISON, 100, 1));
-				if (event.getSource().getEntity() instanceof LivingEntity attacker && attacker != target) {
-					attacker.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 60, 0));
-				}
+				// 🌿 Цветение (Уязвимость + DoT)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BLOOM, 120, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.natural_bloom"), 0x32CD32);
 				yield currentDamage;
 			}
 			case QUANTUM -> {
-				if (!target.level().isClientSide && target.getRandom().nextFloat() < 0.5f) {
-					double dx = (target.getRandom().nextDouble() - 0.5) * 10;
-					double dz = (target.getRandom().nextDouble() - 0.5) * 10;
-					target.teleportTo(target.getX() + dx, target.getY(), target.getZ() + dz);
-					target.level().broadcastEntityEvent(target, (byte) 46);
-				}
-				float quantumMultiplier = 0.5f + target.getRandom().nextFloat() * 2.0f;
+				// ⚛️ Пробой (Игнор защиты)
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BREAK, 100, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.quantum_flux"), 0xFF00FF);
-				yield currentDamage * quantumMultiplier;
+				yield currentDamage;
 			}
 			default -> currentDamage;
 		};
@@ -521,7 +442,7 @@ public class ElementDamageHandler {
 		LegendsOfTheStones.LOGGER.info("THRESHOLD REACHED! Entity: {}, Type: {}", target.getName().getString(), type);
 		return switch (type) {
 			case FIRE -> {
-				target.igniteForSeconds(5);
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BURNING, 200, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.overheating"), 0xFF5500);
 				yield originalDamage;
 			}
@@ -530,71 +451,44 @@ public class ElementDamageHandler {
 				yield originalDamage * 5.0f;
 			}
 			case WIND -> {
-				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1));
-				target.push(0, 0.5, 0);
+				target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 60, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.wind_whirlwind"), 0x00FFFF);
 				yield originalDamage;
 			}
 			case WATER -> {
-				target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 100, 1));
-				target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 100, 0));
-				if (target.isOnFire()) target.extinguishFire();
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.WETNESS, 300, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.water_flood"), 0x0080FF);
 				yield originalDamage;
 			}
 			case EARTH -> {
-				target.addEffect(new MobEffectInstance(MobEffects.OOZING, 80, 4));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.STUN, 60, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.earth_petrify"), 0x8B4513);
-				yield originalDamage * 1.5f;
+				yield originalDamage;
 			}
 			case ICE -> {
-				target.setTicksFrozen(160);
-				if (target.isOnFire()) {
-					target.extinguishFire();
-					target.hurt(target.damageSources().magic(), 2.0f);
-				}
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.FREEZE, 160, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.ice_freeze"), 0x00BFFF);
-				yield originalDamage * 1.25f;
+				yield originalDamage;
 			}
 			case ELECTRIC -> {
-				target.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 40, 0));
-				target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 60, 1));
-				if (!target.level().isClientSide) {
-					target.level().getEntitiesOfClass(LivingEntity.class, target.getBoundingBox().inflate(3.0),
-							e -> e != target && e.isAlive()).forEach(e -> {
-						e.hurt(target.damageSources().magic(), originalDamage * 0.5f);
-						e.igniteForSeconds(2);
-					});
-				}
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.SHOCK, 140, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.electric_shock"), 0xFFFF00);
-				yield originalDamage * 1.5f;
+				yield originalDamage;
 			}
 			case SOURCE -> {
-				var random = target.level().random;
-				switch (random.nextInt(4)) {
-					case 0 -> target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 100, 1));
-					case 1 -> target.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 80, 0));
-					case 2 -> target.addEffect(new MobEffectInstance(MobEffects.HUNGER, 120, 0));
-					case 3 -> target.addEffect(new MobEffectInstance(MobEffects.WITHER, 40, 0));
-				}
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.RIFT, 100, 0, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.source_void"), 0x9932CC);
-				yield originalDamage * 2.0f;
+				yield originalDamage;
 			}
 			case NATURAL -> {
-				target.addEffect(new MobEffectInstance(MobEffects.POISON, 100, 1));
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BLOOM, 120, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.natural_bloom"), 0x32CD32);
 				yield originalDamage;
 			}
 			case QUANTUM -> {
-				if (!target.level().isClientSide && target.getRandom().nextFloat() < 0.5f) {
-					double dx = (target.getRandom().nextDouble() - 0.5) * 10;
-					double dz = (target.getRandom().nextDouble() - 0.5) * 10;
-					target.teleportTo(target.getX() + dx, target.getY(), target.getZ() + dz);
-					target.level().broadcastEntityEvent(target, (byte) 46);
-				}
-				float quantumMultiplier = 0.5f + target.getRandom().nextFloat() * 2.0f;
+				target.addEffect(new MobEffectInstance(LegendsOfTheStonesMobEffects.BREAK, 100, 1, false, false));
 				spawnStatusText(target, Component.translatable("elemental.tooltip.quantum_flux"), 0xFF00FF);
-				yield originalDamage * quantumMultiplier;
+				yield originalDamage;
 			}
 			default -> originalDamage;
 		};
@@ -773,20 +667,20 @@ public class ElementDamageHandler {
 	public static void applyElementalDamageInstant(
 			Entity target,
 			Entity source,
-			ElementType elementType,
+			ElementType elementalType,
 			float baseDamage,
 			float accumMultiplier
 	) {
 		if (!(target.level() instanceof ServerLevel serverLevel) || !(target instanceof LivingEntity livingTarget)) {
 			return;
 		}
-		if (ElementResistanceManager.isImmune(target, elementType)) {
-			LegendsOfTheStones.LOGGER.debug("{} is IMMUNE to {} (instant)", target.getName().getString(), elementType);
+		if (ElementResistanceManager.isImmune(target, elementalType)) {
+			LegendsOfTheStones.LOGGER.debug("{} is IMMUNE to {} (instant)", target.getName().getString(), elementalType);
 			return;
 		}
 
 		var damageTypeRegistry = serverLevel.registryAccess().registryOrThrow(Registries.DAMAGE_TYPE);
-		var rl = ResourceLocation.fromNamespaceAndPath(LegendsOfTheStones.MODID, elementType.getDamageTypeId());
+		var rl = ResourceLocation.fromNamespaceAndPath(LegendsOfTheStones.MODID, elementalType.getDamageTypeId());
 		var damageTypeHolder = damageTypeRegistry.getHolder(rl);
 		if (damageTypeHolder.isEmpty()) {
 			LegendsOfTheStones.LOGGER.error("Damage type NOT FOUND: {}", rl);
@@ -794,31 +688,31 @@ public class ElementDamageHandler {
 		}
 
 		DamageSource dmgSource = new DamageSource(damageTypeHolder.get(), source, source);
-		float finalDamage = ElementResistanceManager.calculateReducedDamage(livingTarget, elementType, baseDamage);
+		float finalDamage = ElementResistanceManager.calculateReducedDamage(livingTarget, elementalType, baseDamage);
 
 		int basePoints = (int) baseAccumulation;
-		int pointsToAdd = ElementResistanceManager.calculateAccumulationPoints(livingTarget, elementType, basePoints);
+		int pointsToAdd = ElementResistanceManager.calculateAccumulationPoints(livingTarget, elementalType, basePoints);
 		pointsToAdd = Math.round(pointsToAdd * accumMultiplier);
 
 		if (pointsToAdd > 0) {
-			int before = LegendsOfTheStonesAttachments.getPoints(livingTarget, elementType);
-			LegendsOfTheStonesAttachments.addPoints(livingTarget, elementType, pointsToAdd);
-			int after = LegendsOfTheStonesAttachments.getPoints(livingTarget, elementType);
+			int before = LegendsOfTheStonesAttachments.getPoints(livingTarget, elementalType);
+			LegendsOfTheStonesAttachments.addPoints(livingTarget, elementalType, pointsToAdd);
+			int after = LegendsOfTheStonesAttachments.getPoints(livingTarget, elementalType);
 			boolean thresholdReached = after >= THRESHOLD;
 
 			LegendsOfTheStones.LOGGER.info("[Instant] {} | {} | x{} | {} +{} → {} | Breakthrough: {}",
-					livingTarget.getName().getString(), elementType, accumMultiplier,
+					livingTarget.getName().getString(), elementalType, accumMultiplier,
 					before, pointsToAdd, after, thresholdReached);
 
 			if (thresholdReached) {
-				finalDamage = applyThresholdEffectWithDamage(livingTarget, elementType, baseDamage);
-				LegendsOfTheStonesAttachments.resetPoints(livingTarget, elementType);
+				finalDamage = applyThresholdEffectWithDamage(livingTarget, elementalType, baseDamage);
+				LegendsOfTheStonesAttachments.resetPoints(livingTarget, elementalType);
 			}
 		}
 		if (canShowDamage(livingTarget)) {
-			spawnDamageNumber(livingTarget, finalDamage, elementType);
+			spawnDamageNumber(livingTarget, finalDamage, elementalType);
 		}
 		target.hurt(dmgSource, finalDamage);
-		updateLastDamageTime(livingTarget, elementType);
+		updateLastDamageTime(livingTarget, elementalType);
 	}
 }

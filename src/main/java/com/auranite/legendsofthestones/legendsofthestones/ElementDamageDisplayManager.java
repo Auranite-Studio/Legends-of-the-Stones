@@ -1,5 +1,6 @@
 package com.auranite.legendsofthestones.legendsofthestones;
 
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.server.level.ServerLevel;
@@ -8,13 +9,14 @@ import net.minecraft.world.entity.Display.TextDisplay;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.AABB;
 
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList; // ВАЖНО: Добавлен импорт
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class ElementDamageDisplayManager {
 
@@ -22,6 +24,11 @@ public class ElementDamageDisplayManager {
     private static final int DAMAGE_NUMBER_LIFETIME = 30;
     private static final int STATUS_TEXT_LIFETIME = 50;
     private static final byte FLAG_SEE_THROUGH = 2;
+
+    // === НОВЫЙ ТЕГ ДЛЯ ОЧИСТКИ ===
+    // Этот тег будет сохраняться в NBT сущности. Если сущность с этим тегом найдена при загрузке мира,
+    // она считается "осиротевшей" (так как менеджер в памяти пуст) и подлежит удалению.
+    public static final String DISPLAY_CLEANUP_TAG = "lots:cleanup_on_load";
 
     // === ФИЗИКА ДЛЯ УРОНА ===
     private static final double DAMAGE_GRAVITY = -0.02;
@@ -55,7 +62,6 @@ public class ElementDamageDisplayManager {
     private static final Map<UUID, double[]> ACTIVE_PHYSICS = new ConcurrentHashMap<>();
 
     // ✅ НОВОЕ: Список сущностей, запланированных на удаление в следующем тике
-    // Используем CopyOnWriteArrayList для безопасности при добавлении из разных потоков/событий
     private static final CopyOnWriteArrayList<TextDisplay> PENDING_REMOVALS = new CopyOnWriteArrayList<>();
 
     // === ЦВЕТА ===
@@ -182,10 +188,6 @@ public class ElementDamageDisplayManager {
         });
     }
 
-    /**
-     * ✅ ИСПРАВЛЕНО: Теперь не удаляет сущности сразу, а добавляет их в очередь.
-     * Это предотвращает ConcurrentModificationException при сохранении чанка.
-     */
     public int cleanupDisplaysInChunk(ServerLevel level, int chunkX, int chunkZ) {
         int count = 0;
 
@@ -200,10 +202,7 @@ public class ElementDamageDisplayManager {
                 int dChunkZ = (int) Math.floor(info.display.getZ() / 16.0);
 
                 if (dChunkX == chunkX && dChunkZ == chunkZ) {
-                    // ✅ ДОБАВЛЯЕМ В ОЧЕРЕДЬ вместо немедленного удаления
                     PENDING_REMOVALS.add(info.display);
-
-                    // Удаляем из наших карт сразу, чтобы не дублировать логику
                     damageIterator.remove();
                     ACTIVE_PHYSICS.remove(entry.getKey());
                     count++;
@@ -225,9 +224,7 @@ public class ElementDamageDisplayManager {
                 int dChunkZ = (int) Math.floor(info.display.getZ() / 16.0);
 
                 if (dChunkX == chunkX && dChunkZ == chunkZ) {
-                    // ✅ ДОБАВЛЯЕМ В ОЧЕРЕДЬ вместо немедленного удаления
                     PENDING_REMOVALS.add(info.display);
-
                     statusIterator.remove();
                     ACTIVE_PHYSICS.remove(entry.getKey());
                     count++;
@@ -241,10 +238,6 @@ public class ElementDamageDisplayManager {
         return count;
     }
 
-    /**
-     * ✅ НОВЫЙ МЕТОД: Выполняет отложенное удаление.
-     * Вызывается в начале каждого тика сервера (в ElementDamageHandler.onServerTick).
-     */
     public void processPendingRemovals() {
         if (PENDING_REMOVALS.isEmpty()) return;
 
@@ -258,6 +251,41 @@ public class ElementDamageDisplayManager {
             }
         }
         PENDING_REMOVALS.clear();
+    }
+
+    // === НОВЫЙ МЕТОД: Очистка "осиротевших" дисплеев при загрузке мира ===
+    /**
+     * Вызывается при загрузке ServerLevel (например, в LevelEvent.LOAD).
+     * Сканирует мир на наличие TextDisplay с тегом DISPLAY_CLEANUP_TAG и удаляет их.
+     * Это предотвращает накопление "мусора", если сервер был выключен некорректно.
+     */
+    public static void cleanupOrphanedDisplaysOnWorldLoad(ServerLevel level) {
+        if (level == null) return;
+
+        int removedCount = 0;
+
+        // Создаём AABB, охватывающий весь возможный мир
+        // 30 000 000 — это стандартный предел генерации мира в Minecraft
+        AABB worldBounds = new AABB(
+                -30_000_000, level.getMinBuildHeight(), -30_000_000,
+                30_000_000, level.getMaxBuildHeight(),  30_000_000
+        );
+
+        // Получаем все TextDisplay в мире
+        for (TextDisplay display : level.getEntitiesOfClass(TextDisplay.class, worldBounds)) {
+            if (display != null && !display.isRemoved()) {
+                // Проверяем наличие тега очистки
+                CompoundTag tag = display.getPersistentData();
+                if (tag.contains(DISPLAY_CLEANUP_TAG, CompoundTag.TAG_BYTE) && tag.getBoolean(DISPLAY_CLEANUP_TAG)) {
+                    display.discard();
+                    removedCount++;
+                }
+            }
+        }
+
+        if (removedCount > 0) {
+            LegendsOfTheStones.LOGGER.info("Cleaned {} orphaned TextDisplay entities on world load.", removedCount);
+        }
     }
 
     // === СПАВН ===
@@ -294,7 +322,7 @@ public class ElementDamageDisplayManager {
                 DisplayInfo info = ACTIVE_DAMAGE_DISPLAYS.remove(displayUuid);
                 if (info != null && !info.display.isRemoved()) {
                     ACTIVE_PHYSICS.remove(displayUuid);
-                    info.display.discard();
+                    if (!info.display.isRemoved()) info.display.discard();
                 }
             });
         }
@@ -331,7 +359,7 @@ public class ElementDamageDisplayManager {
                 DisplayInfo info = ACTIVE_STATUS_DISPLAYS.remove(displayUuid);
                 if (info != null && !info.display.isRemoved()) {
                     ACTIVE_PHYSICS.remove(displayUuid);
-                    info.display.discard();
+                    if (!info.display.isRemoved()) info.display.discard();
                 }
             });
         }
@@ -419,6 +447,19 @@ public class ElementDamageDisplayManager {
     }
 
     // === СОЗДАНИЕ ===
+
+    /**
+     * Рекурсивно помечает сущность и всех её пассажиров тегом очистки.
+     */
+    private static void markForCleanup(Entity entity) {
+        if (entity == null) return;
+        entity.getPersistentData().putBoolean(DISPLAY_CLEANUP_TAG, true);
+        // Если у дисплея есть пассажиры (например, вложенные дисплеи), помечаем и их
+        for (Entity passenger : entity.getPassengers()) {
+            markForCleanup(passenger);
+        }
+    }
+
     private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, Component textComponent, int color) {
         TextDisplay display = EntityType.TEXT_DISPLAY.create(level);
         if (display == null) {
@@ -439,6 +480,9 @@ public class ElementDamageDisplayManager {
         display.setPosRotInterpolationDuration(INTERPOLATION_DURATION);
         display.setTransformationInterpolationDuration(INTERPOLATION_DURATION);
         display.setTransformationInterpolationDelay(0);
+
+        // ✅ МЕТКА ДЛЯ ОЧИСТКИ: Добавляем тег, чтобы сущность можно было найти и удалить при загрузке мира
+        markForCleanup(display);
 
         return display;
     }

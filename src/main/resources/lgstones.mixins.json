@@ -7,12 +7,12 @@
   "mixins": [
   ],
   "client": [
-    "PlayerAnimationMixin",
-    "PlayerAnimationRendererMixin",
-    "CameraAccessor",
-    "EntityRenderDispatcherMixin",
-    "ItemInHandRendererMixin",
-    "LevelRendererMixin"
+    "com.auranite.legendsofthestones.mixins.PlayerAnimationMixin",
+    "com.auranite.legendsofthestones.mixins.PlayerAnimationRendererMixin",
+    "com.auranite.legendsofthestones.mixins.CameraAccessor",
+    "com.auranite.legendsofthestones.mixins.EntityRenderDispatcherMixin",
+    "com.auranite.legendsofthestones.mixins.ItemInHandRendererMixin",
+    "com.auranite.legendsofthestones.mixins.LevelRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

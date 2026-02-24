@@ -49,5 +49,13 @@
   "elemental.tooltip.electric_shock": "🗲 ШОК! ",
   "elemental.tooltip.source_void": "🔮 РАЗЛОМ!",
   "elemental.tooltip.natural_bloom": "❀ЦВЕТЕНИЕ!",
-  "elemental.tooltip.quantum_flux": "⚛ ФЛЮКС!"
+  "elemental.tooltip.quantum_flux": "⚛ ПРОБИТИЕ!",
+  "effect.legendsofthestones.burning": "Горение",
+  "effect.legendsofthestones.wetness": "Влажность",
+  "effect.legendsofthestones.stun": "Оглушение",
+  "effect.legendsofthestones.freeze": "Заморозка",
+  "effect.legendsofthestones.shock": "Шок",
+  "effect.legendsofthestones.rift": "Раскол",
+  "effect.legendsofthestones.bloom": "Цветение",
+  "effect.legendsofthestones.break": "Пробитие"
 }

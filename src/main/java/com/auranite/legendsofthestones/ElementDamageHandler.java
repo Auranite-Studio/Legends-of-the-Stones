@@ -39,7 +39,10 @@ public class ElementDamageHandler {
 	// === КЭШИ И СОСТОЯНИЯ ===
 	private static final Map<Integer, Long> DAMAGE_COOLDOWNS = new ConcurrentHashMap<>();
 	private static final int COOLDOWN_TICKS = 5;
+
+	// ✅ ИСПРАВЛЕНО: Используем synchronized для потокобезопасности вложенных мап
 	private static final Map<Integer, Map<ElementType, Long>> LAST_DAMAGE_TIME = new ConcurrentHashMap<>();
+	private static final Object LAST_DAMAGE_LOCK = new Object();
 
 	private static MinecraftServer currentServer = null;
 	private static int serverTickCounter = 0;
@@ -47,6 +50,14 @@ public class ElementDamageHandler {
 
 	// === ССЫЛКА НА МЕНЕДЖЕР ОТОБРАЖЕНИЯ ===
 	private static ElementDamageDisplayManager displayManager;
+
+	// ✅ НОВОЕ: Защита от рекурсивного урона
+	private static final ThreadLocal<Boolean> IS_PROCESSING_DAMAGE = ThreadLocal.withInitial(() -> false);
+
+	// ✅ НОВОЕ: Лимит активных дисплеев для предотвращения лагов
+	private static final int MAX_ACTIVE_DISPLAYS = 500;
+	private static int currentDisplayCount = 0;
+	private static final Object DISPLAY_COUNT_LOCK = new Object();
 
 	public static void setDisplayManager(ElementDamageDisplayManager manager) {
 		displayManager = manager;
@@ -64,6 +75,31 @@ public class ElementDamageHandler {
 		ElementDamageDisplayManager.registerDamageColor(ElementType.SOURCE, 0xFF5C77);
 		ElementDamageDisplayManager.registerDamageColor(ElementType.NATURAL, 0x32CD32);
 		ElementDamageDisplayManager.registerDamageColor(ElementType.QUANTUM, 0x9400D3);
+	}
+
+	// === УПРАВЛЕНИЕ СЧЁТЧИКОМ ДИСПЛЕЕВ ===
+	public static boolean canSpawnDisplay() {
+		synchronized (DISPLAY_COUNT_LOCK) {
+			return currentDisplayCount < MAX_ACTIVE_DISPLAYS;
+		}
+	}
+
+	public static void incrementDisplayCount() {
+		synchronized (DISPLAY_COUNT_LOCK) {
+			currentDisplayCount++;
+		}
+	}
+
+	public static void decrementDisplayCount() {
+		synchronized (DISPLAY_COUNT_LOCK) {
+			currentDisplayCount = Math.max(0, currentDisplayCount - 1);
+		}
+	}
+
+	public static int getCurrentDisplayCount() {
+		synchronized (DISPLAY_COUNT_LOCK) {
+			return currentDisplayCount;
+		}
 	}
 
 	// === СОБЫТИЯ ===
@@ -87,6 +123,19 @@ public class ElementDamageHandler {
 
 	@SubscribeEvent
 	public static void onLivingHurt(LivingDamageEvent.Pre event) {
+		// ✅ ЗАЩИТА ОТ РЕКУРСИИ
+		if (IS_PROCESSING_DAMAGE.get()) return;
+		IS_PROCESSING_DAMAGE.set(true);
+
+		try {
+			processLivingHurt(event);
+		} finally {
+			IS_PROCESSING_DAMAGE.set(false);
+		}
+	}
+
+	// Вынесена основная логика для чистоты кода
+	private static void processLivingHurt(LivingDamageEvent.Pre event) {
 		LivingEntity target = event.getEntity();
 		LivingEntity attacker = event.getSource().getEntity() instanceof LivingEntity e ? e : null;
 
@@ -168,7 +217,7 @@ public class ElementDamageHandler {
 		// ✅ WETNESS: +100% к накоплению за уровень (для ЛЮБОГО элемента)
 		if (target.hasEffect(LegendsOfTheStonesMobEffects.WETNESS)) {
 			int amplifier = target.getEffect(LegendsOfTheStonesMobEffects.WETNESS).getAmplifier();
-			float wetnessAccumBonus = 1.0f + (amplifier + 1) * 1.0f; // Ур.0: ×2, Ур.1: ×3, Ур.2: ×4
+			float wetnessAccumBonus = 1.0f + (amplifier + 1) * 1.0f;
 			effectiveAccumMultiplier *= wetnessAccumBonus;
 			LegendsOfTheStones.LOGGER.debug("WETNESS on target {}: accum x{} (total x{})",
 					target.getName().getString(), wetnessAccumBonus, effectiveAccumMultiplier);
@@ -213,13 +262,15 @@ public class ElementDamageHandler {
 		updateLastDamageTime(target, type);
 	}
 
-	// === ОСТАЛЬНЫЕ МЕТОДЫ (без изменений) ===
+	// === ОСТАЛЬНЫЕ СОБЫТИЯ ===
 	@SubscribeEvent
 	public static void onLivingDeath(LivingDeathEvent event) {
 		LivingEntity entity = event.getEntity();
 		clearActiveDisplays(entity);
 		DAMAGE_COOLDOWNS.remove(entity.getId());
-		LAST_DAMAGE_TIME.remove(entity.getId());
+		synchronized (LAST_DAMAGE_LOCK) {
+			LAST_DAMAGE_TIME.remove(entity.getId());
+		}
 	}
 
 	@SubscribeEvent
@@ -228,28 +279,44 @@ public class ElementDamageHandler {
 		if (entity instanceof LivingEntity livingEntity) {
 			clearActiveDisplays(livingEntity);
 			DAMAGE_COOLDOWNS.remove(entity.getId());
-			LAST_DAMAGE_TIME.remove(entity.getId());
+			synchronized (LAST_DAMAGE_LOCK) {
+				LAST_DAMAGE_TIME.remove(entity.getId());
+			}
 		}
 	}
 
+	// ✅ ИСПРАВЛЕНО: Удаление только данных конкретного игрока, а не глобальная очистка
 	@SubscribeEvent
 	public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
 		if (!(event.getEntity() instanceof ServerPlayer player)) return;
-		LegendsOfTheStones.LOGGER.info("Player {} logged out. Force cleaning all damage displays immediately.", player.getName().getString());
+
+		LegendsOfTheStones.LOGGER.info("Player {} logged out. Cleaning their displays only.", player.getName().getString());
+
 		if (displayManager != null) {
-			clearActiveDisplays(player);
-			displayManager.cleanupAllDisplays();
+			// ✅ Удаляем только дисплеи, связанные с этим игроком
+			displayManager.clearActiveDisplays(player);
 		}
-		DAMAGE_COOLDOWNS.clear();
-		LAST_DAMAGE_TIME.clear();
+
+		// ✅ Удаляем данные только для этого игрока
+		int playerId = player.getId();
+		DAMAGE_COOLDOWNS.remove(playerId);
+		synchronized (LAST_DAMAGE_LOCK) {
+			LAST_DAMAGE_TIME.remove(playerId);
+		}
+
+		// ❌ НЕ очищаем глобальные мапы!
 	}
 
+	// ✅ ИСПРАВЛЕНО: Не очищаем все дисплеи при выгрузке уровня
 	@SubscribeEvent
 	public static void onLevelUnload(LevelEvent.Unload event) {
-		if (event.getLevel() instanceof ServerLevel) {
-			if (displayManager != null) displayManager.cleanupAllDisplays();
-			LegendsOfTheStones.LOGGER.info("Level unloading. Final cleanup check performed.");
-		}
+		if (!(event.getLevel() instanceof ServerLevel level)) return;
+
+		LegendsOfTheStones.LOGGER.debug("Level {} unloading. Stale displays will be cleaned by periodic cleanup.",
+				level.dimension().location());
+
+		// ✅ cleanupStaleDisplays() в тике уже проверяет level() у каждой сущности,
+		// поэтому отдельная очистка здесь не нужна и даже вредна
 	}
 
 	@SubscribeEvent
@@ -315,44 +382,54 @@ public class ElementDamageHandler {
 	}
 
 	// === УПРАВЛЕНИЕ ВРЕМЕНЕМ ===
+	// ✅ ИСПРАВЛЕНО: Синхронизация доступа к вложенным мап
 	private static void updateLastDamageTime(LivingEntity entity, ElementType type) {
 		int entityId = entity.getId();
 		long gameTime = entity.level().getGameTime();
-		LAST_DAMAGE_TIME.computeIfAbsent(entityId, k -> new EnumMap<>(ElementType.class)).put(type, gameTime);
+
+		synchronized (LAST_DAMAGE_LOCK) {
+			LAST_DAMAGE_TIME
+					.computeIfAbsent(entityId, k -> new EnumMap<>(ElementType.class))
+					.put(type, gameTime);
+		}
 	}
 
 	private static void checkAndResetInactivePoints() {
 		if (currentServer == null) return;
 		long currentTime = currentServer.overworld().getGameTime();
-		Iterator<Map.Entry<Integer, Map<ElementType, Long>>> entityIterator = LAST_DAMAGE_TIME.entrySet().iterator();
-		while (entityIterator.hasNext()) {
-			Map.Entry<Integer, Map<ElementType, Long>> entityEntry = entityIterator.next();
-			int entityId = entityEntry.getKey();
-			Map<ElementType, Long> typeTimes = entityEntry.getValue();
-			LivingEntity livingEntity = null;
-			for (ServerLevel level : currentServer.getAllLevels()) {
-				Entity entity = level.getEntity(entityId);
-				if (entity instanceof LivingEntity le && le.isAlive()) {
-					livingEntity = le;
-					break;
-				}
-			}
-			if (livingEntity == null) { entityIterator.remove(); continue; }
-			Iterator<Map.Entry<ElementType, Long>> typeIterator = typeTimes.entrySet().iterator();
-			while (typeIterator.hasNext()) {
-				Map.Entry<ElementType, Long> typeEntry = typeIterator.next();
-				ElementType type = typeEntry.getKey();
-				long lastTime = typeEntry.getValue();
-				if (currentTime - lastTime >= RESET_DELAY_TICKS) {
-					int pointsBefore = LegendsOfTheStonesAttachments.getPoints(livingEntity, type);
-					if (pointsBefore > 0) {
-						LegendsOfTheStonesAttachments.resetPoints(livingEntity, type);
-						LegendsOfTheStones.LOGGER.debug("Reset {} points for {} (inactive for {} ticks)", pointsBefore, type, RESET_DELAY_TICKS);
+
+		// ✅ Синхронизируем итерацию по LAST_DAMAGE_TIME
+		synchronized (LAST_DAMAGE_LOCK) {
+			Iterator<Map.Entry<Integer, Map<ElementType, Long>>> entityIterator = LAST_DAMAGE_TIME.entrySet().iterator();
+			while (entityIterator.hasNext()) {
+				Map.Entry<Integer, Map<ElementType, Long>> entityEntry = entityIterator.next();
+				int entityId = entityEntry.getKey();
+				Map<ElementType, Long> typeTimes = entityEntry.getValue();
+				LivingEntity livingEntity = null;
+				for (ServerLevel level : currentServer.getAllLevels()) {
+					Entity entity = level.getEntity(entityId);
+					if (entity instanceof LivingEntity le && le.isAlive()) {
+						livingEntity = le;
+						break;
 					}
-					typeIterator.remove();
 				}
+				if (livingEntity == null) { entityIterator.remove(); continue; }
+				Iterator<Map.Entry<ElementType, Long>> typeIterator = typeTimes.entrySet().iterator();
+				while (typeIterator.hasNext()) {
+					Map.Entry<ElementType, Long> typeEntry = typeIterator.next();
+					ElementType type = typeEntry.getKey();
+					long lastTime = typeEntry.getValue();
+					if (currentTime - lastTime >= RESET_DELAY_TICKS) {
+						int pointsBefore = LegendsOfTheStonesAttachments.getPoints(livingEntity, type);
+						if (pointsBefore > 0) {
+							LegendsOfTheStonesAttachments.resetPoints(livingEntity, type);
+							LegendsOfTheStones.LOGGER.debug("Reset {} points for {} (inactive for {} ticks)", pointsBefore, type, RESET_DELAY_TICKS);
+						}
+						typeIterator.remove();
+					}
+				}
+				if (typeTimes.isEmpty()) entityIterator.remove();
 			}
-			if (typeTimes.isEmpty()) entityIterator.remove();
 		}
 	}
 
@@ -371,14 +448,31 @@ public class ElementDamageHandler {
 	private static void clearActiveDisplays(LivingEntity entity) {
 		if (displayManager != null) displayManager.clearActiveDisplays(entity);
 	}
+
 	private static void spawnDamageNumber(LivingEntity entity, float amount, ElementType type) {
-		if (displayManager != null) displayManager.spawnDamageNumber(entity, amount, type);
+		// ✅ ПРОВЕРКА ЛИМИТА ДИСПЛЕЕВ
+		if (!canSpawnDisplay()) {
+			LegendsOfTheStones.LOGGER.debug("Display limit reached ({}), skipping damage number for {}",
+					MAX_ACTIVE_DISPLAYS, entity.getName().getString());
+			return;
+		}
+
+		if (displayManager != null) {
+			incrementDisplayCount();
+			displayManager.spawnDamageNumber(entity, amount, type);
+		}
 	}
+
 	public static void spawnStatusText(LivingEntity entity, Component textComponent, int color) {
-		if (displayManager != null) displayManager.spawnStatusText(entity, textComponent, color);
+		if (!canSpawnDisplay()) return;
+		if (displayManager != null) {
+			incrementDisplayCount();
+			displayManager.spawnStatusText(entity, textComponent, color);
+		}
 	}
+
 	public static void spawnStatusText(LivingEntity entity, String text, int color) {
-		if (displayManager != null) displayManager.spawnStatusText(entity, text, color);
+		spawnStatusText(entity, Component.literal(text), color);
 	}
 
 	// === ПОРОГОВЫЕ ЭФФЕКТЫ ===
@@ -513,7 +607,19 @@ public class ElementDamageHandler {
 		dealElementDamage(target, type, amount, 0);
 	}
 
+	// ✅ ИСПРАВЛЕНО: Защита от рекурсии в публичном API
 	public static void dealElementDamage(Entity target, ElementType type, float amount, int accumulationPoints) {
+		if (IS_PROCESSING_DAMAGE.get()) return;
+		IS_PROCESSING_DAMAGE.set(true);
+
+		try {
+			processDealElementDamage(target, type, amount, accumulationPoints);
+		} finally {
+			IS_PROCESSING_DAMAGE.set(false);
+		}
+	}
+
+	private static void processDealElementDamage(Entity target, ElementType type, float amount, int accumulationPoints) {
 		if (!(target.level() instanceof ServerLevel serverLevel)) {
 			LegendsOfTheStones.LOGGER.warn("dealElementDamage: not server level"); return;
 		}
@@ -565,6 +671,17 @@ public class ElementDamageHandler {
 	}
 
 	public static void dealElementDamageWithAccum(Entity target, ElementType type, float amount, float accumMultiplier) {
+		if (IS_PROCESSING_DAMAGE.get()) return;
+		IS_PROCESSING_DAMAGE.set(true);
+
+		try {
+			processDealElementDamageWithAccum(target, type, amount, accumMultiplier);
+		} finally {
+			IS_PROCESSING_DAMAGE.set(false);
+		}
+	}
+
+	private static void processDealElementDamageWithAccum(Entity target, ElementType type, float amount, float accumMultiplier) {
 		if (!(target.level() instanceof ServerLevel serverLevel)) {
 			LegendsOfTheStones.LOGGER.warn("dealElementDamageWithAccum: not server level"); return;
 		}
@@ -578,7 +695,7 @@ public class ElementDamageHandler {
 		var rl = ResourceLocation.fromNamespaceAndPath(LegendsOfTheStones.MODID, type.getDamageTypeId());
 		var damageTypeHolder = damageTypeRegistry.getHolder(rl);
 		if (damageTypeHolder.isEmpty()) {
-			LegendsOfTheStones.LOGGER.error("Damage type NOT FOUND: {} - урон НЕ будет нанесён!", rl); return;
+			LegendsOfTheStones.LOGGER.error("Damage type NOT FOUND: {}", rl); return;
 		}
 		DamageSource source = new DamageSource(damageTypeHolder.get());
 		float finalDamage = amount;
@@ -616,13 +733,17 @@ public class ElementDamageHandler {
 	}
 	public static void resetElementPoints(LivingEntity entity, ElementType type) {
 		LegendsOfTheStonesAttachments.resetPoints(entity, type);
-		LAST_DAMAGE_TIME.computeIfPresent(entity.getId(), (id, map) -> {
-			map.remove(type); return map.isEmpty() ? null : map;
-		});
+		synchronized (LAST_DAMAGE_LOCK) {
+			LAST_DAMAGE_TIME.computeIfPresent(entity.getId(), (id, map) -> {
+				map.remove(type); return map.isEmpty() ? null : map;
+			});
+		}
 	}
 	public static void resetAllElementPoints(LivingEntity entity) {
 		for (ElementType type : ElementType.values()) LegendsOfTheStonesAttachments.resetPoints(entity, type);
-		LAST_DAMAGE_TIME.remove(entity.getId());
+		synchronized (LAST_DAMAGE_LOCK) {
+			LAST_DAMAGE_TIME.remove(entity.getId());
+		}
 	}
 	public static int getAccumulationProgress(LivingEntity entity, ElementType type) {
 		int points = getElementPoints(entity, type);
@@ -641,6 +762,17 @@ public class ElementDamageHandler {
 	}
 
 	public static void applyElementalDamageInstant(Entity target, Entity source, ElementType elementalType, float baseDamage, float accumMultiplier) {
+		if (IS_PROCESSING_DAMAGE.get()) return;
+		IS_PROCESSING_DAMAGE.set(true);
+
+		try {
+			processApplyElementalDamageInstant(target, source, elementalType, baseDamage, accumMultiplier);
+		} finally {
+			IS_PROCESSING_DAMAGE.set(false);
+		}
+	}
+
+	private static void processApplyElementalDamageInstant(Entity target, Entity source, ElementType elementalType, float baseDamage, float accumMultiplier) {
 		if (!(target.level() instanceof ServerLevel serverLevel) || !(target instanceof LivingEntity livingTarget)) return;
 		if (ElementResistanceManager.isImmune(target, elementalType)) {
 			LegendsOfTheStones.LOGGER.debug("{} is IMMUNE to {} (instant)", target.getName().getString(), elementalType); return;

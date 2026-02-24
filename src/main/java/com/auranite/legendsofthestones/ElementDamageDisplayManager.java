@@ -484,24 +484,28 @@ public class ElementDamageDisplayManager {
      * Безопасное удаление с отправкой пакета клиенту
      */
     private void safeRemoveDisplay(ServerLevel level, UUID displayUuid, TextDisplay display, DisplayInfo info) {
-        // ✅ Удаляем vanilla-тег, чтобы сущность не считалась "осиротевшей"
         display.removeTag(CLEANUP_TAG);
 
-        // Отправляем пакет удаления клиенту
-        level.getChunkSource().broadcastAndSend(
-                display,
-                new ClientboundRemoveEntitiesPacket(display.getId())
-        );
-
-        // Удаляем на сервере
-        if (!display.isRemoved()) {
+        // ✅ Проверяем, что сущность ещё в мире и канал активен
+        if (!display.isRemoved() && display.level() != null) {
+            var chunkSource = level.getChunkSource();
+            if (chunkSource != null) {
+                try {
+                    chunkSource.broadcastAndSend(
+                            display,
+                            new ClientboundRemoveEntitiesPacket(display.getId())
+                    );
+                } catch (Exception e) {
+                    // ✅ Ловим исключения сети, чтобы не спамить ERROR
+                    LegendsOfTheStones.LOGGER.debug("Failed to send remove packet for display {}: {}",
+                            display.getId(), e.getMessage());
+                }
+            }
             display.discard();
         }
 
-        // Чистим ресурсы
         cleanupDisplayResources(displayUuid);
     }
-
     /**
      * Тихое удаление (без UUID) для случаев очистки/страховки
      */

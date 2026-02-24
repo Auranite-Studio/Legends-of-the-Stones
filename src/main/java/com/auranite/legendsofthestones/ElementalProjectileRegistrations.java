@@ -22,22 +22,18 @@ public class ElementalProjectileRegistrations {
     public static void registerAll() {
         // === СТАНДАРТНЫЕ СНАРЯДЫ MINECRAFT ===
 
-        // Физические
-        ElementalProjectileRegistry.registerProjectile(EntityType.ARROW, ElementType.PHYSICAL,5f );
-        ElementalProjectileRegistry.registerProjectile(EntityType.SPECTRAL_ARROW, ElementType.PHYSICAL, 5f);
-
         // Огненные
-        ElementalProjectileRegistry.registerProjectile(EntityType.FIREBALL, ElementType.FIRE, 100f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.SMALL_FIREBALL, ElementType.FIRE, 50f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.DRAGON_FIREBALL, ElementType.SOURCE, 25f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.FIREBALL, ElementType.FIRE, 0f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.SMALL_FIREBALL, ElementType.FIRE, 0f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.DRAGON_FIREBALL, ElementType.SOURCE, 0f);
 
         // Другие
-        ElementalProjectileRegistry.registerProjectile(EntityType.FIREWORK_ROCKET, ElementType.PHYSICAL, 50f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.WITHER_SKULL, ElementType.EARTH, 20f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.SHULKER_BULLET, ElementType.WIND, 20f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.LLAMA_SPIT, ElementType.WATER, 3f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.BREEZE_WIND_CHARGE, ElementType.WIND, 20f);
-        ElementalProjectileRegistry.registerProjectile(EntityType.WIND_CHARGE, ElementType.WIND, 20f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.FIREWORK_ROCKET, ElementType.PHYSICAL, 0f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.WITHER_SKULL, ElementType.EARTH, 0f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.SHULKER_BULLET, ElementType.WIND, 0f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.LLAMA_SPIT, ElementType.WATER, 0f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.BREEZE_WIND_CHARGE, ElementType.WIND, 0f);
+        ElementalProjectileRegistry.registerProjectile(EntityType.WIND_CHARGE, ElementType.WIND, 0f);
 
         // === КАСТОМНЫЕ СНАРЯДЫ МОДА ===
         // ✅ ТЕПЕРЬ МОЖНО ИСПОЛЬЗОВАТЬ .get() БЕЗ ОШИБОК

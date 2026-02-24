@@ -23,7 +23,7 @@ public class ElementalWeaponComponent {
      * Добавляет элементальный тип к ItemStack.
      */
     public static ItemStack withElement(ItemStack stack, ElementType type) {
-        return withElementAndAccum(stack, type, 1.0f);
+        return withElementAndAccum(stack, type, 1f);
     }
 
     /**

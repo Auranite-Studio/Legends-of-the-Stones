@@ -35,29 +35,29 @@ public class ElementalWeaponRegistrationHandler {
     }
 
     private static void registerFireWeapons() {
-        ElementalWeaponUtils.registerItem(Items.BLAZE_ROD, ElementType.FIRE, 10f);
-        ElementalWeaponUtils.registerItem(Items.FLINT_AND_STEEL, ElementType.FIRE, 1f);
+        ElementalWeaponUtils.registerItem(Items.BLAZE_ROD, ElementType.FIRE, 3f);
+        ElementalWeaponUtils.registerItem(Items.BREEZE_ROD, ElementType.FIRE, 3f);
     }
 
     private static void registerPhysicalWeapons() {
-        ElementalWeaponUtils.registerItem(Items.NETHERITE_SWORD, ElementType.PHYSICAL, 15f);
-        ElementalWeaponUtils.registerItem(Items.DIAMOND_SWORD, ElementType.PHYSICAL, 10f);
-        ElementalWeaponUtils.registerItem(Items.GOLDEN_SWORD, ElementType.PHYSICAL, 6f);
-        ElementalWeaponUtils.registerItem(Items.IRON_SWORD, ElementType.PHYSICAL, 7f);
-        ElementalWeaponUtils.registerItem(Items.STONE_SWORD, ElementType.PHYSICAL, 4f);
-        ElementalWeaponUtils.registerItem(Items.WOODEN_SWORD, ElementType.PHYSICAL, 2f);
+        ElementalWeaponUtils.registerItem(Items.NETHERITE_SWORD, ElementType.PHYSICAL, 5f);
+        ElementalWeaponUtils.registerItem(Items.DIAMOND_SWORD, ElementType.PHYSICAL, 5f);
+        ElementalWeaponUtils.registerItem(Items.GOLDEN_SWORD, ElementType.PHYSICAL, 4f);
+        ElementalWeaponUtils.registerItem(Items.IRON_SWORD, ElementType.PHYSICAL, 3f);
+        ElementalWeaponUtils.registerItem(Items.STONE_SWORD, ElementType.PHYSICAL, 2f);
+        ElementalWeaponUtils.registerItem(Items.WOODEN_SWORD, ElementType.PHYSICAL, 1f);
 
-        ElementalWeaponUtils.registerItem(Items.NETHERITE_AXE, ElementType.PHYSICAL, 20f);
-        ElementalWeaponUtils.registerItem(Items.DIAMOND_AXE, ElementType.PHYSICAL, 15f);
-        ElementalWeaponUtils.registerItem(Items.GOLDEN_AXE, ElementType.PHYSICAL, 9f);
-        ElementalWeaponUtils.registerItem(Items.IRON_AXE, ElementType.PHYSICAL, 10f);
-        ElementalWeaponUtils.registerItem(Items.STONE_AXE, ElementType.PHYSICAL, 5f);
-        ElementalWeaponUtils.registerItem(Items.WOODEN_AXE, ElementType.PHYSICAL, 3f);
+        ElementalWeaponUtils.registerItem(Items.NETHERITE_AXE, ElementType.PHYSICAL, 7f);
+        ElementalWeaponUtils.registerItem(Items.DIAMOND_AXE, ElementType.PHYSICAL, 7f);
+        ElementalWeaponUtils.registerItem(Items.GOLDEN_AXE, ElementType.PHYSICAL, 6f);
+        ElementalWeaponUtils.registerItem(Items.IRON_AXE, ElementType.PHYSICAL, 5f);
+        ElementalWeaponUtils.registerItem(Items.STONE_AXE, ElementType.PHYSICAL, 4f);
+        ElementalWeaponUtils.registerItem(Items.WOODEN_AXE, ElementType.PHYSICAL, 2f);
 
-        ElementalWeaponUtils.registerItem(Items.CROSSBOW, ElementType.PHYSICAL, 20f);
-        ElementalWeaponUtils.registerItem(Items.TRIDENT, ElementType.PHYSICAL, 12f);
-        ElementalWeaponUtils.registerItem(Items.MACE, ElementType.PHYSICAL, 50f);
-        ElementalWeaponUtils.registerItem(Items.BOW, ElementType.PHYSICAL, 5f);
+        ElementalWeaponUtils.registerItem(Items.CROSSBOW, ElementType.PHYSICAL, 7f);
+        ElementalWeaponUtils.registerItem(Items.TRIDENT, ElementType.PHYSICAL, 4f);
+        ElementalWeaponUtils.registerItem(Items.MACE, ElementType.PHYSICAL, 25f);
+        ElementalWeaponUtils.registerItem(Items.BOW, ElementType.PHYSICAL, 1f);
     }
 
     private static void registerWindWeapons() {

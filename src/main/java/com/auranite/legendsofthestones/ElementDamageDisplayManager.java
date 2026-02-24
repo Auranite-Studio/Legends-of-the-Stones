@@ -3,6 +3,7 @@ package com.auranite.legendsofthestones;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
+import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Display.BillboardConstraints;
 import net.minecraft.world.entity.Display.TextDisplay;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 
 public class ElementDamageDisplayManager {
 
@@ -25,10 +27,13 @@ public class ElementDamageDisplayManager {
     private static final int STATUS_TEXT_LIFETIME = 50;
     private static final byte FLAG_SEE_THROUGH = 2;
 
-    // === НОВЫЙ ТЕГ ДЛЯ ОЧИСТКИ ===
-    // Этот тег будет сохраняться в NBT сущности. Если сущность с этим тегом найдена при загрузке мира,
-    // она считается "осиротевшей" (так как менеджер в памяти пуст) и подлежит удалению.
-    public static final String DISPLAY_CLEANUP_TAG = "lots:cleanup_on_load";
+    // === ТЕГИ ДЛЯ ОЧИСТКИ (Vanilla Entity Tags) ===
+    public static final String CLEANUP_TAG = "lots:cleanup_on_load";
+    public static final String SELF_DESTRUCT_TAG = "lots:self_destruct";
+
+    // === КЛЮЧИ NBT ДЛЯ SELF-DESTRUCT ===
+    private static final String NBT_MAX_LIFETIME = "lots:max_lifetime";
+    private static final String NBT_AGE = "lots:age";
 
     // === ФИЗИКА ДЛЯ УРОНА ===
     private static final double DAMAGE_GRAVITY = -0.02;
@@ -40,11 +45,14 @@ public class ElementDamageDisplayManager {
     private static final double STATUS_FLOAT_SPEED = 0.15;
     private static final int INTERPOLATION_DURATION = 3;
 
+    // === ЗАПАС ВРЕМЕНИ ДЛЯ SELF-DESTRUCT (в тиках) ===
+    private static final int SELF_DESTRUCT_BUFFER = 20;
+
     // === ВСПОМОГАТЕЛЬНЫЙ КЛАСС ===
     private static class DisplayInfo {
         final TextDisplay display;
         final int targetEntityId;
-        final boolean isStatus; // true = статус, false = урон
+        final boolean isStatus;
 
         DisplayInfo(TextDisplay display, int targetEntityId, boolean isStatus) {
             this.display = display;
@@ -53,15 +61,13 @@ public class ElementDamageDisplayManager {
         }
     }
 
-    // === ХРАНИЛИЩА (Ключ - UUID дисплея) ===
+    // === ХРАНИЛИЩА ===
     private static final Map<UUID, DisplayInfo> ACTIVE_DAMAGE_DISPLAYS = new ConcurrentHashMap<>();
     private static final Map<UUID, DisplayInfo> ACTIVE_STATUS_DISPLAYS = new ConcurrentHashMap<>();
     private static final Map<ElementType, Integer> DAMAGE_COLORS = new EnumMap<>(ElementType.class);
-
-    // === ФИЗИКА [velX, velY, velZ, ticksAlive, maxTicks, originalColor, floatOffset] ===
     private static final Map<UUID, double[]> ACTIVE_PHYSICS = new ConcurrentHashMap<>();
 
-    // ✅ НОВОЕ: Список сущностей, запланированных на удаление в следующем тике
+    // ✅ Списки для отложенного удаления
     private static final CopyOnWriteArrayList<TextDisplay> PENDING_REMOVALS = new CopyOnWriteArrayList<>();
 
     // === ЦВЕТА ===
@@ -87,7 +93,6 @@ public class ElementDamageDisplayManager {
     public void cleanupStaleDisplays() {
         int cleanedCount = 0;
 
-        // Очистка урона
         Iterator<Map.Entry<UUID, DisplayInfo>> damageIterator = ACTIVE_DAMAGE_DISPLAYS.entrySet().iterator();
         while (damageIterator.hasNext()) {
             Map.Entry<UUID, DisplayInfo> entry = damageIterator.next();
@@ -103,14 +108,13 @@ public class ElementDamageDisplayManager {
 
             Entity target = info.display.level().getEntity(info.targetEntityId);
             if (target == null || !target.isAlive()) {
-                if (!info.display.isRemoved()) info.display.discard();
+                if (!info.display.isRemoved()) safeRemoveDisplaySilent(info.display);
                 damageIterator.remove();
                 ACTIVE_PHYSICS.remove(displayUuid);
                 cleanedCount++;
             }
         }
 
-        // Очистка статусов
         Iterator<Map.Entry<UUID, DisplayInfo>> statusIterator = ACTIVE_STATUS_DISPLAYS.entrySet().iterator();
         while (statusIterator.hasNext()) {
             Map.Entry<UUID, DisplayInfo> entry = statusIterator.next();
@@ -126,7 +130,7 @@ public class ElementDamageDisplayManager {
 
             Entity target = info.display.level().getEntity(info.targetEntityId);
             if (target == null || !target.isAlive()) {
-                if (!info.display.isRemoved()) info.display.discard();
+                if (!info.display.isRemoved()) safeRemoveDisplaySilent(info.display);
                 statusIterator.remove();
                 ACTIVE_PHYSICS.remove(displayUuid);
                 cleanedCount++;
@@ -143,19 +147,19 @@ public class ElementDamageDisplayManager {
 
         for (DisplayInfo info : ACTIVE_DAMAGE_DISPLAYS.values()) {
             if (info != null && info.display != null && !info.display.isRemoved()) {
-                if (info.display.level() != null) info.display.discard();
+                safeRemoveDisplaySilent(info.display);
             }
         }
         ACTIVE_DAMAGE_DISPLAYS.clear();
 
         for (DisplayInfo info : ACTIVE_STATUS_DISPLAYS.values()) {
             if (info != null && info.display != null && !info.display.isRemoved()) {
-                if (info.display.level() != null) info.display.discard();
+                safeRemoveDisplaySilent(info.display);
             }
         }
         ACTIVE_STATUS_DISPLAYS.clear();
-
         ACTIVE_PHYSICS.clear();
+
         LegendsOfTheStones.LOGGER.info("All element damage displays cleared successfully.");
     }
 
@@ -167,7 +171,7 @@ public class ElementDamageDisplayManager {
             DisplayInfo info = entry.getValue();
             if (info != null && info.targetEntityId == entityId) {
                 if (info.display != null && !info.display.isRemoved()) {
-                    if (info.display.level() != null) info.display.discard();
+                    safeRemoveDisplaySilent(info.display);
                 }
                 ACTIVE_PHYSICS.remove(entry.getKey());
                 return true;
@@ -179,7 +183,7 @@ public class ElementDamageDisplayManager {
             DisplayInfo info = entry.getValue();
             if (info != null && info.targetEntityId == entityId) {
                 if (info.display != null && !info.display.isRemoved()) {
-                    if (info.display.level() != null) info.display.discard();
+                    safeRemoveDisplaySilent(info.display);
                 }
                 ACTIVE_PHYSICS.remove(entry.getKey());
                 return true;
@@ -191,7 +195,6 @@ public class ElementDamageDisplayManager {
     public int cleanupDisplaysInChunk(ServerLevel level, int chunkX, int chunkZ) {
         int count = 0;
 
-        // Очистка урона
         Iterator<Map.Entry<UUID, DisplayInfo>> damageIterator = ACTIVE_DAMAGE_DISPLAYS.entrySet().iterator();
         while (damageIterator.hasNext()) {
             Map.Entry<UUID, DisplayInfo> entry = damageIterator.next();
@@ -213,7 +216,6 @@ public class ElementDamageDisplayManager {
             }
         }
 
-        // Очистка статусов
         Iterator<Map.Entry<UUID, DisplayInfo>> statusIterator = ACTIVE_STATUS_DISPLAYS.entrySet().iterator();
         while (statusIterator.hasNext()) {
             Map.Entry<UUID, DisplayInfo> entry = statusIterator.next();
@@ -244,7 +246,7 @@ public class ElementDamageDisplayManager {
         for (TextDisplay display : PENDING_REMOVALS) {
             if (display != null && !display.isRemoved() && display.level() != null) {
                 try {
-                    display.discard();
+                    safeRemoveDisplaySilent(display);
                 } catch (Exception e) {
                     LegendsOfTheStones.LOGGER.warn("Failed to discard pending display: {}", e.getMessage());
                 }
@@ -253,38 +255,59 @@ public class ElementDamageDisplayManager {
         PENDING_REMOVALS.clear();
     }
 
-    // === НОВЫЙ МЕТОД: Очистка "осиротевших" дисплеев при загрузке мира ===
+    // === ОЧИСТКА "ОСИРОВЕВШИХ" ДИСПЛЕЕВ ПРИ ЗАГРУЗКЕ МИРА ===
     /**
-     * Вызывается при загрузке ServerLevel (например, в LevelEvent.LOAD).
-     * Сканирует мир на наличие TextDisplay с тегом DISPLAY_CLEANUP_TAG и удаляет их.
-     * Это предотвращает накопление "мусора", если сервер был выключен некорректно.
+     * Вызывается при загрузке ServerLevel через server.execute() для гарантии загрузки чанков.
+     * ✅ ИСПРАВЛЕНО: Используем getTags().contains() вместо hasTag() для совместимости с 1.19-1.20
      */
     public static void cleanupOrphanedDisplaysOnWorldLoad(ServerLevel level) {
         if (level == null) return;
 
+        long startTime = System.currentTimeMillis();
         int removedCount = 0;
 
-        // Создаём AABB, охватывающий весь возможный мир
-        // 30 000 000 — это стандартный предел генерации мира в Minecraft
-        AABB worldBounds = new AABB(
-                -30_000_000, level.getMinBuildHeight(), -30_000_000,
-                30_000_000, level.getMaxBuildHeight(),  30_000_000
-        );
+        // ✅ Совместимый Predicate для 1.19-1.20
+        Predicate<Entity> hasCleanupTag = e -> e.getTags().contains(CLEANUP_TAG) && !e.isRemoved();
 
-        // Получаем все TextDisplay в мире
-        for (TextDisplay display : level.getEntitiesOfClass(TextDisplay.class, worldBounds)) {
+        for (TextDisplay display : level.getEntities(EntityType.TEXT_DISPLAY, hasCleanupTag)) {
             if (display != null && !display.isRemoved()) {
-                // Проверяем наличие тега очистки
-                CompoundTag tag = display.getPersistentData();
-                if (tag.contains(DISPLAY_CLEANUP_TAG, CompoundTag.TAG_BYTE) && tag.getBoolean(DISPLAY_CLEANUP_TAG)) {
-                    display.discard();
-                    removedCount++;
-                }
+                display.discard();
+                removedCount++;
             }
         }
 
+        long duration = System.currentTimeMillis() - startTime;
         if (removedCount > 0) {
-            LegendsOfTheStones.LOGGER.info("Cleaned {} orphaned TextDisplay entities on world load.", removedCount);
+            LegendsOfTheStones.LOGGER.info("Cleaned {} orphaned TextDisplay entities on world load in {}ms", removedCount, duration);
+        }
+    }
+
+    // === SELF-DESTRUCT МЕХАНИЗМ (последний рубеж защиты) ===
+    /**
+     * Вызывается каждый тик сервера для всех уровней.
+     * Проверяет TextDisplay с флагом self_destruct и удаляет их по истечении времени.
+     */
+    public static void tickSelfDestructDisplays(ServerLevel level) {
+        if (level == null) return;
+
+        // ✅ Совместимый Predicate для 1.19-1.20
+        Predicate<Entity> hasSelfDestruct = e -> {
+            CompoundTag tag = e.getPersistentData();
+            return tag.getBoolean(SELF_DESTRUCT_TAG) && !e.isRemoved();
+        };
+
+        for (TextDisplay display : level.getEntities(EntityType.TEXT_DISPLAY, hasSelfDestruct)) {
+            if (display == null || display.isRemoved()) continue;
+
+            CompoundTag tag = display.getPersistentData();
+            int age = tag.getInt(NBT_AGE) + 1;
+            int maxLife = tag.getInt(NBT_MAX_LIFETIME);
+
+            if (age >= maxLife) {
+                display.discard();
+            } else {
+                tag.putInt(NBT_AGE, age);
+            }
         }
     }
 
@@ -303,7 +326,8 @@ public class ElementDamageDisplayManager {
                 entity.getY() + entity.getBbHeight() + 0.5,
                 entity.getZ() + offsetZ,
                 String.format("%.1f", amount),
-                color
+                color,
+                DAMAGE_NUMBER_LIFETIME + SELF_DESTRUCT_BUFFER
         );
 
         if (display != null) {
@@ -318,11 +342,12 @@ public class ElementDamageDisplayManager {
 
             schedulePhysicsUpdate(serverLevel, displayUuid);
 
-            LegendsOfTheStones.queueServerWork(DAMAGE_NUMBER_LIFETIME, () -> {
-                DisplayInfo info = ACTIVE_DAMAGE_DISPLAYS.remove(displayUuid);
-                if (info != null && !info.display.isRemoved()) {
-                    ACTIVE_PHYSICS.remove(displayUuid);
-                    if (!info.display.isRemoved()) info.display.discard();
+            // ✅ Страховка с запасом +10 тиков
+            LegendsOfTheStones.queueServerWork(DAMAGE_NUMBER_LIFETIME + 10, () -> {
+                if (ACTIVE_PHYSICS.containsKey(displayUuid)) {
+                    TextDisplay d = (TextDisplay) serverLevel.getEntity(displayUuid);
+                    if (d != null && !d.isRemoved()) safeRemoveDisplaySilent(d);
+                    cleanupDisplayResources(displayUuid);
                 }
             });
         }
@@ -341,7 +366,8 @@ public class ElementDamageDisplayManager {
                 entity.getY() + entity.getBbHeight() + 1.2,
                 entity.getZ() + offsetZ,
                 textComponent,
-                color
+                color,
+                STATUS_TEXT_LIFETIME + SELF_DESTRUCT_BUFFER
         );
 
         if (display != null) {
@@ -355,11 +381,12 @@ public class ElementDamageDisplayManager {
 
             schedulePhysicsUpdate(serverLevel, displayUuid);
 
-            LegendsOfTheStones.queueServerWork(STATUS_TEXT_LIFETIME, () -> {
-                DisplayInfo info = ACTIVE_STATUS_DISPLAYS.remove(displayUuid);
-                if (info != null && !info.display.isRemoved()) {
-                    ACTIVE_PHYSICS.remove(displayUuid);
-                    if (!info.display.isRemoved()) info.display.discard();
+            // ✅ Страховка с запасом +10 тиков
+            LegendsOfTheStones.queueServerWork(STATUS_TEXT_LIFETIME + 10, () -> {
+                if (ACTIVE_PHYSICS.containsKey(displayUuid)) {
+                    TextDisplay d = (TextDisplay) serverLevel.getEntity(displayUuid);
+                    if (d != null && !d.isRemoved()) safeRemoveDisplaySilent(d);
+                    cleanupDisplayResources(displayUuid);
                 }
             });
         }
@@ -374,23 +401,23 @@ public class ElementDamageDisplayManager {
         LegendsOfTheStones.queueServerWork(1, () -> {
             TextDisplay display = (TextDisplay) level.getEntity(displayUuid);
             double[] physics = ACTIVE_PHYSICS.get(displayUuid);
+            DisplayInfo info = ACTIVE_DAMAGE_DISPLAYS.get(displayUuid);
+            if (info == null) info = ACTIVE_STATUS_DISPLAYS.get(displayUuid);
 
+            // Если сущности или физики нет — очищаем и выходим
             if (display == null || display.isRemoved() || physics == null) {
-                ACTIVE_PHYSICS.remove(displayUuid);
+                cleanupDisplayResources(displayUuid);
                 return;
             }
 
-            physics[3]++; // ticksAlive++
+            physics[3]++;
             int ticksAlive = (int) physics[3];
             int maxTicks = (int) physics[4];
             int originalColor = (int) physics[5];
             double floatPhase = physics[6];
 
-            DisplayInfo info = ACTIVE_DAMAGE_DISPLAYS.get(displayUuid);
-            if (info == null) info = ACTIVE_STATUS_DISPLAYS.get(displayUuid);
-
+            // === ОБНОВЛЕНИЕ: СТАТУС ===
             if (info != null && info.isStatus) {
-                // === СТАТУС: Парение + Переливание ===
                 floatPhase += STATUS_FLOAT_SPEED;
                 physics[6] = floatPhase;
 
@@ -412,8 +439,9 @@ public class ElementDamageDisplayManager {
                     display.setText(currentText.copy().withStyle(Style.EMPTY.withColor(shimmerColor).withBold(true)));
                 }
 
-            } else {
-                // === УРОН: Падение с гравитацией ===
+            }
+            // === ОБНОВЛЕНИЕ: УРОН ===
+            else {
                 physics[1] += DAMAGE_GRAVITY;
                 display.setPos(display.getX() + physics[0], display.getY() + physics[1], display.getZ() + physics[2]);
 
@@ -437,30 +465,93 @@ public class ElementDamageDisplayManager {
                 }
             }
 
-            if (!display.isRemoved() && ticksAlive < maxTicks) {
+            // === ЕДИНОЕ МЕСТО УДАЛЕНИЯ ===
+            if (ticksAlive >= maxTicks) {
+                safeRemoveDisplay(level, displayUuid, display, info);
+                return;
+            }
+
+            // Рекурсия
+            if (!display.isRemoved()) {
                 schedulePhysicsUpdate(level, displayUuid);
-            } else {
-                ACTIVE_PHYSICS.remove(displayUuid);
-                if (!display.isRemoved()) display.discard();
             }
         });
+    }
+
+    // === ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ УДАЛЕНИЯ ===
+
+    /**
+     * Безопасное удаление с отправкой пакета клиенту
+     */
+    private void safeRemoveDisplay(ServerLevel level, UUID displayUuid, TextDisplay display, DisplayInfo info) {
+        // ✅ Удаляем vanilla-тег, чтобы сущность не считалась "осиротевшей"
+        display.removeTag(CLEANUP_TAG);
+
+        // Отправляем пакет удаления клиенту
+        level.getChunkSource().broadcastAndSend(
+                display,
+                new ClientboundRemoveEntitiesPacket(display.getId())
+        );
+
+        // Удаляем на сервере
+        if (!display.isRemoved()) {
+            display.discard();
+        }
+
+        // Чистим ресурсы
+        cleanupDisplayResources(displayUuid);
+    }
+
+    /**
+     * Тихое удаление (без UUID) для случаев очистки/страховки
+     */
+    private void safeRemoveDisplaySilent(TextDisplay display) {
+        if (display == null || display.isRemoved() || display.level() == null) return;
+
+        // ✅ Удаляем vanilla-тег
+        display.removeTag(CLEANUP_TAG);
+
+        ServerLevel level = (ServerLevel) display.level();
+        level.getChunkSource().broadcastAndSend(
+                display,
+                new ClientboundRemoveEntitiesPacket(display.getId())
+        );
+        display.discard();
+    }
+
+    /**
+     * Очистка коллекций менеджера
+     */
+    private void cleanupDisplayResources(UUID uuid) {
+        ACTIVE_DAMAGE_DISPLAYS.remove(uuid);
+        ACTIVE_STATUS_DISPLAYS.remove(uuid);
+        ACTIVE_PHYSICS.remove(uuid);
     }
 
     // === СОЗДАНИЕ ===
 
     /**
-     * Рекурсивно помечает сущность и всех её пассажиров тегом очистки.
+     * Рекурсивно помечает сущность и всех её пассажиров тегами очистки.
+     * ✅ Использует vanilla entity tags вместо PersistentData
      */
-    private static void markForCleanup(Entity entity) {
+    private static void markForCleanup(Entity entity, int maxLifetime) {
         if (entity == null) return;
-        entity.getPersistentData().putBoolean(DISPLAY_CLEANUP_TAG, true);
-        // Если у дисплея есть пассажиры (например, вложенные дисплеи), помечаем и их
+
+        // ✅ Vanilla-тег для очистки при загрузке мира (совместимо с 1.19+)
+        entity.addTag(CLEANUP_TAG);
+
+        // ✅ NBT-данные для self-destruct механизма
+        CompoundTag tag = entity.getPersistentData();
+        tag.putBoolean(SELF_DESTRUCT_TAG, true);
+        tag.putInt(NBT_MAX_LIFETIME, maxLifetime);
+        tag.putInt(NBT_AGE, 0);
+
         for (Entity passenger : entity.getPassengers()) {
-            markForCleanup(passenger);
+            markForCleanup(passenger, maxLifetime);
         }
     }
 
-    private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, Component textComponent, int color) {
+    private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, Component textComponent, int color, int maxLifetime) {
         TextDisplay display = EntityType.TEXT_DISPLAY.create(level);
         if (display == null) {
             LegendsOfTheStones.LOGGER.error("Failed to create TextDisplay entity at ({}, {}, {})", x, y, z);
@@ -481,13 +572,13 @@ public class ElementDamageDisplayManager {
         display.setTransformationInterpolationDuration(INTERPOLATION_DURATION);
         display.setTransformationInterpolationDelay(0);
 
-        // ✅ МЕТКА ДЛЯ ОЧИСТКИ: Добавляем тег, чтобы сущность можно было найти и удалить при загрузке мира
-        markForCleanup(display);
+        // ✅ МЕТКА ДЛЯ ОЧИСТКИ: vanilla-тег + NBT для self-destruct
+        markForCleanup(display, maxLifetime);
 
         return display;
     }
 
-    private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, String text, int color) {
-        return createTextDisplay(level, x, y, z, Component.literal(text), color);
+    private static TextDisplay createTextDisplay(ServerLevel level, double x, double y, double z, String text, int color, int maxLifetime) {
+        return createTextDisplay(level, x, y, z, Component.literal(text), color, maxLifetime);
     }
 }

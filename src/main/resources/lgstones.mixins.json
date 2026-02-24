@@ -1,18 +1,18 @@
 {
   "required": true,
   "minVersion": "0.8",
-  "package": "com.auranite.legendsofthestones.legendsofthestones.mixins",
+  "package": "com.auranite.legendsofthestones.mixins",
   "compatibilityLevel": "JAVA_8",
   "refmap": "Legends-of-the-Stones.refmap.json",
   "mixins": [
   ],
   "client": [
-    "com.auranite.legendsofthestones.mixins.PlayerAnimationMixin",
-    "com.auranite.legendsofthestones.mixins.PlayerAnimationRendererMixin",
-    "com.auranite.legendsofthestones.mixins.CameraAccessor",
-    "com.auranite.legendsofthestones.mixins.EntityRenderDispatcherMixin",
-    "com.auranite.legendsofthestones.mixins.ItemInHandRendererMixin",
-    "com.auranite.legendsofthestones.mixins.LevelRendererMixin"
+    "PlayerAnimationMixin",
+    "PlayerAnimationRendererMixin",
+    "CameraAccessor",
+    "EntityRenderDispatcherMixin",
+    "ItemInHandRendererMixin",
+    "LevelRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
